@@ -4,8 +4,21 @@ build-backend = "hatchling.build"
 
 [project]
 name = "jpegfs"
-version = "0.1.0"
+version = "0.1.2"
+description = "Steganographic filesystem for JPEG photo collections"
 readme = "README.md"
 license = "GPL-3.0-only"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 authors = [{ name = "Artem Abramov" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/artabramov/jpegfs"
+Repository = "https://github.com/artabramov/jpegfs"
+
+[project.scripts]
+jpegfs = "jpegfs.cli:main"
