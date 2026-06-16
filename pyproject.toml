@@ -1,11 +1,12 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
 name = "jpegfs"
-version = "0.1.2"
-description = "Steganographic filesystem for JPEG photo collections"
+version = "0.1.4"
+description = "Covert encrypted virtual filesystem distributed across JPEG files"
+keywords = ["jpeg", "encryption", "filesystem", "steganography", "cli"]
 readme = "README.md"
 license = "GPL-3.0-only"
 requires-python = ">=3.12"
@@ -14,6 +15,9 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Operating System :: OS Independent",
+]
+dependencies = [
+    "cryptography >=49.0"
 ]
 
 [project.urls]
