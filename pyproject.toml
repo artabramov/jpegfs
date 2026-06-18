@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "jpegfs"
-version = "0.1.4"
+version = "0.1.5"
 description = "Covert encrypted virtual filesystem distributed across JPEG files"
 keywords = ["jpeg", "encryption", "filesystem", "steganography", "cli"]
 readme = "README.md"
@@ -17,7 +17,8 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "cryptography >=49.0"
+    "cryptography >=49.0",
+    "zfec >=1.6"
 ]
 
 [project.urls]
