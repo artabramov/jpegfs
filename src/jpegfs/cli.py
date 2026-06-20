@@ -4,7 +4,7 @@ import argparse
 import sys
 from importlib.metadata import PackageNotFoundError, version
 
-from .commands import cmd_init
+from .commands import cmd_help, cmd_init
 
 
 def _version() -> str:
@@ -40,6 +40,9 @@ def main() -> None:
     )
 
     subs = parser.add_subparsers(dest="command", metavar="COMMAND")
+
+    p_help = subs.add_parser("help", help="Show usage and command descriptions.")
+    p_help.set_defaults(func=cmd_help)
 
     p_init = subs.add_parser("init", help="Create a new container.")
     _add_common_args(p_init)
