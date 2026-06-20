@@ -87,6 +87,44 @@ def _read_password(args: argparse.Namespace, confirm: bool = False) -> str:
     return password
 
 
+def cmd_put(args: argparse.Namespace) -> None:
+    directory = Path(args.dir).resolve()
+    if not directory.is_dir():
+        print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
+        sys.exit(1)
+
+    if args.stdin:
+        if not args.as_name:
+            print("Error: --as is required when using --stdin.", file=sys.stderr)
+            sys.exit(1)
+        name = args.as_name
+        content = sys.stdin.buffer.read()
+    else:
+        if not args.file:
+            print("Error: specify a source file or use --stdin.", file=sys.stderr)
+            sys.exit(1)
+        source = Path(args.file)
+        if not source.is_file():
+            print(f"Error: '{source}' is not a file.", file=sys.stderr)
+            sys.exit(1)
+        name = args.as_name if args.as_name else source.name
+        try:
+            content = source.read_bytes()
+        except OSError as e:
+            print(f"Error reading file: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    password = _read_password(args)
+
+    try:
+        container.put_file(directory, password, name, content)
+    except (JpegFsError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"'{name}' added to the container.")
+
+
 def cmd_wipe(args: argparse.Namespace) -> None:
     directory = Path(args.dir).resolve()
     if not directory.is_dir():

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.12] - 2026-06-20
+
+- Added the `put` command. Supports importing files under their original name, a custom name (`--as`), or from `stdin` (`--stdin --as <name>`).
+- Improved container update atomicity. Temporary files are now fully written and synchronized before any originals are replaced, preventing partially updated container generations if the process is interrupted.
+
+
 ## [0.1.11] - 2026-06-20
 
 - Added the `wipe` command.

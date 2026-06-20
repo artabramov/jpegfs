@@ -36,7 +36,14 @@ def read_tail(path: Path) -> bytes:
 
 
 def write_tail(path: Path, tail: bytes) -> None:
-    """Atomically replace the tail after JPEG EOI."""
+    """Atomically replace the tail of a single JPEG file."""
+    tmp = _write_tmp(path, tail)
+    os.replace(tmp, path)
+    _fsync_dir(path.parent)
+
+
+def _write_tmp(path: Path, tail: bytes) -> Path:
+    """Write JPEG body + tail to a .tmp file and fsync it. Returns the tmp path."""
     jpeg_body = read_jpeg_body(path)
     tmp = path.with_suffix(path.suffix + ".tmp")
     try:
@@ -44,8 +51,7 @@ def write_tail(path: Path, tail: bytes) -> None:
             f.write(jpeg_body + tail)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path)
-        _fsync_dir(path.parent)
+        return tmp
     except BaseException:
         try:
             tmp.unlink(missing_ok=True)

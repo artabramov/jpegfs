@@ -2,7 +2,7 @@ import argparse
 import sys
 from importlib.metadata import PackageNotFoundError, version
 
-from .commands import cmd_help, cmd_init, cmd_wipe
+from .commands import cmd_help, cmd_init, cmd_put, cmd_wipe
 
 
 def _version() -> str:
@@ -65,6 +65,15 @@ def main() -> None:
         help="Confirm permanent destruction of the container.",
     )
     p_wipe.set_defaults(func=cmd_wipe)
+
+    p_put = subs.add_parser("put", help="Add a file to the container.")
+    _add_common_args(p_put)
+    p_put.add_argument("file", nargs="?", metavar="FILE", help="Source file to add.")
+    p_put.add_argument("--as", dest="as_name", metavar="NAME",
+                       help="Store under a different name.")
+    p_put.add_argument("--stdin", action="store_true",
+                       help="Read file content from stdin.")
+    p_put.set_defaults(func=cmd_put)
 
     args = parser.parse_args()
 

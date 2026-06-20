@@ -24,3 +24,11 @@ class NoCarriersError(JpegFsError):
 
 class NotEnoughCarriersError(JpegFsError):
     pass
+
+
+class ContainerFileExistsError(JpegFsError):
+    pass
+
+
+class ContainerFileNotFoundError(JpegFsError):
+    pass

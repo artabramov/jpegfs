@@ -19,6 +19,26 @@ def create_empty_zip() -> bytes:
     return buf.getvalue()
 
 
+def zip_list_files(zip_data: bytes) -> list[str]:
+    with zipfile.ZipFile(io.BytesIO(zip_data), "r") as zf:
+        return zf.namelist()
+
+
+def zip_add_file(zip_data: bytes, name: str, content: bytes) -> bytes:
+    from .errors import ContainerFileExistsError
+    if name in zip_list_files(zip_data):
+        raise ContainerFileExistsError(
+            f"'{name}' already exists in the container. Delete it first."
+        )
+    new_buf = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(zip_data), "r") as zin:
+        with zipfile.ZipFile(new_buf, "w", compression=zipfile.ZIP_STORED) as zout:
+            for info in zin.infolist():
+                zout.writestr(info, zin.read(info.filename))
+            zout.writestr(name, content)
+    return new_buf.getvalue()
+
+
 def encode(zip_data: bytes, master_key: bytes, k: int, n: int) -> list[bytes]:
     """ZIP bytes -> list of n shards."""
     nonce = crypto.random_bytes(_NONCE_SIZE)
