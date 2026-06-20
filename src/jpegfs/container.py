@@ -201,6 +201,11 @@ def put_file(directory: Path, password: str, name: str, content: bytes) -> None:
     store(state, new_zip, password)
 
 
+def list_files(directory: Path, password: str) -> list[payload.FileInfo]:
+    state = load(directory, password)
+    return payload.zip_list_files_info(state.zip_data)
+
+
     """Remove jpegfs tails from all carrier JPEGs. Returns the number of wiped files."""
     carriers = [p for p in scan_jpeg_files(directory) if has_tail(p)]
 

@@ -87,6 +87,42 @@ def _read_password(args: argparse.Namespace, confirm: bool = False) -> str:
     return password
 
 
+def cmd_ls(args: argparse.Namespace) -> None:
+    directory = Path(args.dir).resolve()
+    if not directory.is_dir():
+        print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
+        sys.exit(1)
+
+    password = _read_password(args)
+
+    try:
+        files = container.list_files(directory, password)
+    except (JpegFsError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if not files:
+        print("Container is empty.")
+        return
+
+    name_w = max(len(f.name) for f in files)
+    name_w = max(name_w, 4)
+    print(f"{'name':<{name_w}}  {'size':>10}  modified")
+    print(f"{'-' * name_w}  {'-' * 10}  -------------------")
+    for f in files:
+        y, mo, d, h, mi, s = f.modified
+        modified = f"{y:04d}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}:{s:02d}"
+        print(f"{f.name:<{name_w}}  {_fmt_size(f.size):>10}  {modified}")
+
+
+def _fmt_size(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"
+
+
 def cmd_put(args: argparse.Namespace) -> None:
     directory = Path(args.dir).resolve()
     if not directory.is_dir():

@@ -19,9 +19,27 @@ def create_empty_zip() -> bytes:
     return buf.getvalue()
 
 
+from dataclasses import dataclass
+
+
+@dataclass
+class FileInfo:
+    name: str
+    size: int       # uncompressed bytes
+    modified: tuple # (year, month, day, hour, minute, second)
+
+
 def zip_list_files(zip_data: bytes) -> list[str]:
     with zipfile.ZipFile(io.BytesIO(zip_data), "r") as zf:
         return zf.namelist()
+
+
+def zip_list_files_info(zip_data: bytes) -> list[FileInfo]:
+    with zipfile.ZipFile(io.BytesIO(zip_data), "r") as zf:
+        return [
+            FileInfo(name=info.filename, size=info.file_size, modified=info.date_time)
+            for info in zf.infolist()
+        ]
 
 
 def zip_add_file(zip_data: bytes, name: str, content: bytes) -> bytes:

@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.13] - 2026-06-20
+
+- Added the `ls` and `list` commands. Lists all files stored in the container in a formatted table showing the file name, uncompressed size, and last modified timestamp.
+
 ## [0.1.12] - 2026-06-20
 
 - Added the `put` command. Supports importing files under their original name, a custom name (`--as`), or from `stdin` (`--stdin --as <name>`).

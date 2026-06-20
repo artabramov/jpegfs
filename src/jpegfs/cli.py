@@ -2,7 +2,7 @@ import argparse
 import sys
 from importlib.metadata import PackageNotFoundError, version
 
-from .commands import cmd_help, cmd_init, cmd_put, cmd_wipe
+from .commands import cmd_help, cmd_init, cmd_ls, cmd_put, cmd_wipe
 
 
 def _version() -> str:
@@ -74,6 +74,11 @@ def main() -> None:
     p_put.add_argument("--stdin", action="store_true",
                        help="Read file content from stdin.")
     p_put.set_defaults(func=cmd_put)
+
+    for alias in ("ls", "list"):
+        p_ls = subs.add_parser(alias, help="List files stored in the container.")
+        _add_common_args(p_ls)
+        p_ls.set_defaults(func=cmd_ls)
 
     args = parser.parse_args()
 
