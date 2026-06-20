@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.9] - 2026-06-20
+
+- Fixed the `help` command.
+
 ## [0.1.8] - 2026-06-20
 
 - Removed the `future annotations`.

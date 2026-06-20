@@ -1,5 +1,3 @@
-
-
 import argparse
 import sys
 from importlib.metadata import PackageNotFoundError, version
@@ -31,7 +29,13 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="jpegfs",
-        description="Encrypted file container distributed across JPEG photos.",
+        add_help=False,
+    )
+    parser.add_argument(
+        "-h", "--help",
+        action="store_true",
+        default=False,
+        help="Show this help message and exit.",
     )
     parser.add_argument(
         "--version",
@@ -40,9 +44,6 @@ def main() -> None:
     )
 
     subs = parser.add_subparsers(dest="command", metavar="COMMAND")
-
-    p_help = subs.add_parser("help", help="Show usage and command descriptions.")
-    p_help.set_defaults(func=cmd_help)
 
     p_init = subs.add_parser("init", help="Create a new container.")
     _add_common_args(p_init)
@@ -56,8 +57,9 @@ def main() -> None:
     p_init.set_defaults(func=cmd_init)
 
     args = parser.parse_args()
-    if not hasattr(args, "func"):
-        parser.print_help()
+
+    if args.help or not hasattr(args, "func"):
+        cmd_help(args)
         sys.exit(0)
 
     args.func(args)
