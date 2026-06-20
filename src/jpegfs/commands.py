@@ -87,6 +87,23 @@ def _read_password(args: argparse.Namespace, confirm: bool = False) -> str:
     return password
 
 
+def cmd_wipe(args: argparse.Namespace) -> None:
+    directory = Path(args.dir).resolve()
+    if not directory.is_dir():
+        print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
+        sys.exit(1)
+
+    password = _read_password(args)
+
+    try:
+        count = container.wipe(directory, password)
+    except (JpegFsError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Container wiped: {count} file(s) cleared.")
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     directory = Path(args.dir).resolve()
     if not directory.is_dir():

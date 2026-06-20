@@ -2,7 +2,7 @@ import argparse
 import sys
 from importlib.metadata import PackageNotFoundError, version
 
-from .commands import cmd_help, cmd_init
+from .commands import cmd_help, cmd_init, cmd_wipe
 
 
 def _version() -> str:
@@ -55,6 +55,16 @@ def main() -> None:
         help="Minimum number of JPEG files required to reconstruct the container.",
     )
     p_init.set_defaults(func=cmd_init)
+
+    p_wipe = subs.add_parser("wipe", help="Permanently destroy the container.")
+    _add_common_args(p_wipe)
+    p_wipe.add_argument(
+        "--yes",
+        action="store_true",
+        required=True,
+        help="Confirm permanent destruction of the container.",
+    )
+    p_wipe.set_defaults(func=cmd_wipe)
 
     args = parser.parse_args()
 

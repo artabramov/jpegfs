@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.11] - 2026-06-20
+
+- Added the `wipe` command.
+
 ## [0.1.10] - 2026-06-20
 
 - Fixed bug in the `init` command.

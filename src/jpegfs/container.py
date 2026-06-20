@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from . import crypto, jpeg, key_material, payload, shard_metadata
-from .errors import ContainerExistsError, NoCarriersError, NotEnoughCarriersError
+from .errors import ContainerExistsError, ContainerNotFoundError, NoCarriersError, NotEnoughCarriersError
 
 _MASTER_KEY_SIZE = 32
 _UUID_SIZE = 16
@@ -59,3 +59,25 @@ def init(directory: Path, password: str, threshold: int) -> None:
         )
         tail = km.to_bytes() + sm.encrypt(master_key) + shard
         jpeg.write_tail(path, tail)
+
+
+def _verify_password(path: Path, password: str) -> bytes:
+    """Decrypt master_key from the first carrier to confirm the password is correct."""
+    tail = jpeg.read_tail(path)
+    km = key_material.KeyMaterial.from_bytes(tail)
+    return km.decrypt_master_key(password)
+
+
+def wipe(directory: Path, password: str) -> int:
+    """Remove jpegfs tails from all carrier JPEGs. Returns the number of wiped files."""
+    carriers = [p for p in scan_jpeg_files(directory) if has_tail(p)]
+
+    if not carriers:
+        raise ContainerNotFoundError("No jpegfs container found in the directory.")
+
+    _verify_password(carriers[0], password)
+
+    for path in carriers:
+        jpeg.write_tail(path, b"")
+
+    return len(carriers)
