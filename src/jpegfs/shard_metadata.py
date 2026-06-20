@@ -35,7 +35,7 @@ class ShardMetadata:
         return nonce + crypto.encrypt(master_key, nonce, plaintext)
 
     @classmethod
-    def from_encrypted(cls, data: bytes, master_key: bytes) -> ShardMetadata:
+    def from_encrypted(cls, data: bytes, master_key: bytes) -> "ShardMetadata":
         if len(data) < SIZE:
             raise ValueError(f"Shard metadata too short: {len(data)} < {SIZE}.")
         nonce = data[:_NONCE_SIZE]

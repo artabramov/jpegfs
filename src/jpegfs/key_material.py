@@ -18,7 +18,7 @@ class KeyMaterial:
     encrypted_master_key: bytes  # 48 bytes
 
     @classmethod
-    def create(cls, password: str, master_key: bytes) -> KeyMaterial:
+    def create(cls, password: str, master_key: bytes) -> "KeyMaterial":
         salt = crypto.random_bytes(_SALT_SIZE)
         key_nonce = crypto.random_bytes(_NONCE_SIZE)
         derived = crypto.derive_key(password, salt)
@@ -29,7 +29,7 @@ class KeyMaterial:
         return self.salt + self.key_nonce + self.encrypted_master_key
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> KeyMaterial:
+    def from_bytes(cls, data: bytes) -> "KeyMaterial":
         if len(data) < SIZE:
             raise ValueError(f"Key material too short: {len(data)} < {SIZE}.")
         return cls(
