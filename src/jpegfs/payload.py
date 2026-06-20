@@ -32,7 +32,9 @@ def encode(zip_data: bytes, master_key: bytes, k: int, n: int) -> list[bytes]:
         framed += b"\x00" * (k - remainder)
 
     encoder = zfec.Encoder(k, n)
-    return encoder.encode(framed)
+    piece_size = len(framed) // k
+    pieces = [framed[i * piece_size:(i + 1) * piece_size] for i in range(k)]
+    return encoder.encode(pieces)
 
 
 def decode(shards: list[bytes | None], indices: list[int], master_key: bytes, k: int, n: int) -> bytes:
