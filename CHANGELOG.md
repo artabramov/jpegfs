@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.15] - 2026-06-21
+
+- Fixed a bug in the `list` command where the last file row and the totals line were printed twice due to leftover code from a previous edit.
+
 ## [0.1.14] - 2026-06-21
 
 - Removed the `check` command. Its functionality — container UUID, generation, threshold, and shard availability — is now displayed at the top of the `ls`/`list` output, along with the total container size.

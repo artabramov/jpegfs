@@ -125,11 +125,6 @@ def cmd_ls(args: argparse.Namespace) -> None:
 
     print()
     print(f"{len(files)} file(s)  {_fmt_size(total_size)} total")
-    modified = f"{y:04d}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}:{s:02d}"
-    print(f"{f.name:<{name_w}}  {_fmt_size(f.size):>10}  {modified}")
-
-    print()
-    print(f"{len(files)} file(s)  {_fmt_size(total_size)} total")
 
 
 def _fmt_size(n: int) -> str:
