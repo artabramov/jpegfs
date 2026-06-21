@@ -239,6 +239,53 @@ def change_password(directory: Path, old_password: str, new_password: str) -> No
     _two_phase_write(tmp_map, carriers[0].parent)
 
 
+def repair(directory: Path, password: str) -> tuple[int, int, int]:
+    """
+    Rebuild the container across ALL JPEG files currently in the directory,
+    incorporating any new clean files and recovering from lost shards.
+
+    Returns (old_available, old_total, new_total) so the caller can report
+    what changed.
+    """
+    state = load(directory, password)
+    all_jpegs = scan_jpeg_files(directory)
+    new_n = len(all_jpegs)
+
+    if new_n < state.threshold:
+        needed = state.threshold - new_n
+        raise NotEnoughCarriersError(
+            f"Not enough JPEG files. Add {needed} more JPEG file(s) to the directory."
+        )
+
+    new_generation = state.generation + 1
+    new_shards = payload.encode(state.zip_data, state.master_key, state.threshold, new_n)
+
+    tmp_map: list[tuple[Path, Path]] = []
+    try:
+        for i, path in enumerate(all_jpegs):
+            km = key_material.KeyMaterial.create(password, state.master_key)
+            sm = shard_metadata.ShardMetadata(
+                container_uuid=state.container_uuid,
+                container_generation=new_generation,
+                container_threshold=state.threshold,
+                shard_index=i,
+                shard_total=new_n,
+            )
+            tail = km.to_bytes() + sm.encrypt(state.master_key) + new_shards[i]
+            tmp = jpeg._write_tmp(path, tail)
+            tmp_map.append((tmp, path))
+    except BaseException:
+        for tmp, _ in tmp_map:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
+
+    _two_phase_write(tmp_map, all_jpegs[0].parent)
+    return len(state.carriers), state.shard_total, new_n
+
+
 def wipe(directory: Path, password: str) -> int:
     """Remove jpegfs tails from all carrier JPEGs. Returns the number of wiped files."""
     carriers = [p for p in scan_jpeg_files(directory) if has_tail(p)]

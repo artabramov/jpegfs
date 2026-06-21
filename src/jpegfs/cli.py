@@ -4,7 +4,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 from .commands import (
     cmd_del, cmd_get, cmd_help, cmd_init, cmd_ls,
-    cmd_passwd, cmd_put, cmd_read, cmd_wipe, cmd_write,
+    cmd_passwd, cmd_put, cmd_read, cmd_repair, cmd_wipe, cmd_write,
 )
 
 
@@ -58,6 +58,10 @@ def main() -> None:
         help="Minimum number of JPEG files required to reconstruct the container.",
     )
     p_init.set_defaults(func=cmd_init)
+
+    p_repair = subs.add_parser("repair", help="Restore full shard redundancy.")
+    _add_common_args(p_repair)
+    p_repair.set_defaults(func=cmd_repair)
 
     p_wipe = subs.add_parser("wipe", help="Permanently destroy the container.")
     _add_common_args(p_wipe)

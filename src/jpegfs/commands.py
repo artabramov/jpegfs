@@ -35,10 +35,11 @@ Commands:
       shards) followed by a table of files stored in the container.      
 
   repair
-      Restore full shard redundancy. Reconstructs the container from available
-      shards and redistributes it across all JPEG files, including any new
-      files added to the directory. Fails if there are not enough clean JPEG
-      files to fill the required number of shards.
+      Restore full shard redundancy. Reconstructs the container from the
+      available shards and redistributes it across every JPEG file in the
+      directory, including any new files added since the last write. After
+      repair, every JPEG file in the directory carries exactly one shard.
+      Fails if there are not enough JPEG files to satisfy the threshold.
 
   wipe --yes
       Permanently destroy the container by removing all appended data from
@@ -63,10 +64,6 @@ Commands:
 
   del <name>
       Delete a file from the container.
-
-  passwd
-      Change the container password. Only the key material is re-encrypted;
-      the payload is not rebuilt.
 """
 
 
@@ -282,6 +279,29 @@ def cmd_wipe(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     print(f"Container wiped: {count} file(s) cleared.")
+
+
+def cmd_repair(args: argparse.Namespace) -> None:
+    directory = Path(args.dir).resolve()
+    if not directory.is_dir():
+        print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
+        sys.exit(1)
+
+    password = _read_password(args)
+
+    try:
+        old_available, old_total, new_total = container.repair(directory, password)
+    except (JpegFsError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if new_total != old_total or old_available < old_total:
+        print(
+            f"Container repaired: {old_available}/{old_total} → "
+            f"{new_total}/{new_total} shards available."
+        )
+    else:
+        print(f"Container repaired: {new_total}/{new_total} shards available (no change).")
 
 
 def cmd_init(args: argparse.Namespace) -> None:

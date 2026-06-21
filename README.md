@@ -31,7 +31,9 @@ All commands accept an optional `--dir` argument that specifies the directory co
 
 `write` — read file content from `stdin` and store it in the container under the specified name (`jpegfs write --as secret.pdf`).
 
-`get` — extract a file from the container. Files can be extracted using the original name (`jpegfs get file1.pdf`), a different name (`jpegfs get file1.pdf --as copy.pdf`), or written directly to `stdout` (`jpegfs get file1.pdf --stdout`).
+`get <name> [--as <output>]` — extract a file from the container to the current directory. Use `--as` to save it under a different name.
+
+`read <name>` — extract a file from the container and write its content to `stdout`.
 
 `del` — delete a file from the container.
 

@@ -3,6 +3,8 @@
 ## [0.1.17] - 2026-06-21
 
 - Fixed a critical data-corruption bug in `jpeg.py`. The previous `_eoi_end` implementation searched for the last `\xff\xd9` sequence, which could appear inside the encrypted tail and cause incorrect file splitting. Replaced it with a structured JPEG parser that reliably locates the actual EOI marker.
+- Added the `repair` command. Reconstructs the container from available shards and redistributes it across all JPEG files in the directory. Each file receives exactly one shard, newly added files are included automatically, and the generation number is incremented. Fails if the number of JPEG files is below the configured threshold.
+
 
 ## [0.1.16] - 2026-06-21
 
