@@ -1,14 +1,12 @@
-# jpegfs
+# jpegfs — encrypted file container distributed across JPEG images
 
-The project is a file container that uses a collection of JPEG files as a distributed carrier for encrypted data. From the user's perspective, it provides the interface of a simple virtual filesystem with a flat structure.
-
-The core idea is not to hide a single file inside a single image, but to create an encrypted container distributed across multiple images.
+The project is a file container that uses a collection of JPEG files as a distributed carrier for encrypted data. From the user's perspective, it provides the interface of a simple virtual filesystem with a flat structure. The core idea is not to hide a single file inside a single image, but to **create an encrypted container distributed across multiple images.**
 
 User files are encrypted with a randomly generated master key and split into redundant shards using erasure coding. A set of JPEG files is then selected, and additional data is appended to each file after the JPEG `EOI` (End of Image) marker. This data includes cryptographic material, encrypted shard metadata, and one of the data shards. With the correct password, files can be added to, extracted from, read from, and written to the container directly, including through standard input/output streams.
 
-The system is designed to remain operational even if some of the JPEG files are lost. As long as a sufficient number of shards remain available, the entire container can be reconstructed and any lost redundancy can be regenerated.
+The system is designed to **remain operational even if some of the JPEG files are lost.** As long as a sufficient number of shards remain available, the entire container can be reconstructed and any lost redundancy can be regenerated.
 
-The project is not a steganographic system in the traditional sense. The additional data can be easily detected by examining the contents of a file beyond the JPEG `EOI`. However, the images themselves remain unchanged, and the appended data appears as a cryptographically random sequence of bytes. It contains no plaintext information and does not reveal its purpose or contents without knowledge of the correct password. Even when such data is discovered, it is not possible to determine whether it represents meaningful information, an encrypted container, or simply an arbitrary sequence of bytes.
+The project is **not a steganographic system in the traditional sense.** The additional data can be easily detected by examining the contents of a file beyond the JPEG `EOI`. However, the images themselves remain unchanged, and the appended data appears as a cryptographically random sequence of bytes. It contains no plaintext information and does not reveal its purpose or contents without knowledge of the correct password. Even when such data is discovered, it is not possible to determine whether it represents meaningful information, an encrypted container, or simply an arbitrary sequence of bytes.
 
 
 ## Commands
