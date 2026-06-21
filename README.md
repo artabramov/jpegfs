@@ -19,13 +19,13 @@ All commands accept an optional `--dir` argument that specifies the directory co
 
 `init` — create a new container. Accepts `--threshold`. Generates a random `master_key`, creates a new `container_uuid`, sets `generation = 1`, and creates an empty ZIP archive. If the directory already contains at least one valid `jpegfs` shard, the command fails.
 
+`list`, `ls` — display container information (`UUID`, `generation`, `threshold`, available shards) followed by a table of files stored in the container, including file name, uncompressed size, and last modified timestamp.
+
 `repair` — restore full shard redundancy. Locates all JPEG files containing valid shards, reconstructs the latest recoverable generation, decrypts the container, finds unused JPEG files without appended data, increments the generation number, and rebuilds the container using a new set of JPEG files. If there are not enough clean JPEG files available, the command fails and reports how many additional JPEG files must be added.
 
 `wipe --yes` — permanently destroy the container by removing all appended data from participating JPEG files (truncate files after the JPEG `EOI` marker `FF D9`). The `--yes` flag is mandatory.
 
 `passwd` — change the container password. Only the `key material` blocks are re-encrypted. The ZIP archive and shard payloads are not rebuilt.
-
-`ls`, `list` — display container information (`UUID`, `generation`, `threshold`, available shards) followed by a table of files stored in the container, including file name, uncompressed size, and last modified timestamp.
 
 `put` — add a file to the container. The original filename is used by default (`jpegfs put file1.pdf`), a different name can be specified with `--as` (`jpegfs put file1.pdf --as secret.pdf`), and files can also be created from `stdin` (`jpegfs put --stdin --as secret.pdf`).
 
