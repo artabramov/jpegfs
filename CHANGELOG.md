@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.16] - 2026-06-21
+
+- Split the `get` command into two: `get <name> [--as <output>]` extracts a file to the current directory, and `read <name>` writes the file content to stdout.
+- Split the `put` command into two: `put <file> [--as <name>]` adds a file from disk, and `write --as <name>` reads content from stdin. The `--stdin` flag is removed.
+- Added the `del <name>` command. Removes a file from the container and rewrites all carrier JPEG files with an incremented generation.
+- Added the `passwd` command. Re-encrypts the key material block on every carrier JPEG using the new password. The shard payload and metadata are not rebuilt.
+
 ## [0.1.15] - 2026-06-21
 
 - Fixed a bug in the `list` command where the last file row and the totals line were printed twice due to leftover code from a previous edit.

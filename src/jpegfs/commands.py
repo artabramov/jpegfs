@@ -49,17 +49,24 @@ Commands:
       the payload is not rebuilt.
 
   put <file> [--as <name>]
-  put --stdin --as <name>
       Add a file to the container. Use --as to store it under a different name.
-      Use --stdin to read the file content from standard input.
+
+  write --as <name>
+      Read file content from stdin and store it in the container under <name>.
 
   get <name> [--as <output>]
-  get <name> --stdout
-      Extract a file from the container. Use --as to save it under a different
-      name. Use --stdout to write the content to standard output.
+      Extract a file from the container to the current directory. Use --as to
+      save it under a different name.
+
+  read <name>
+      Extract a file from the container and write its content to stdout.
 
   del <name>
       Delete a file from the container.
+
+  passwd
+      Change the container password. Only the key material is re-encrypted;
+      the payload is not rebuilt.
 """
 
 
@@ -67,7 +74,8 @@ def cmd_help(args: argparse.Namespace) -> None:
     print(_HELP_TEXT, end="")
 
 
-def _read_password(args: argparse.Namespace, confirm: bool = False) -> str:
+def _read_password(args: argparse.Namespace, confirm: bool = False,
+                   prompt: str = "Password: ") -> str:
     if getattr(args, "password_file", None):
         try:
             with open(args.password_file, encoding="utf-8") as f:
@@ -76,9 +84,9 @@ def _read_password(args: argparse.Namespace, confirm: bool = False) -> str:
             print(f"Error reading password file: {e}", file=sys.stderr)
             sys.exit(1)
 
-    password = getpass.getpass("Password: ")
+    password = getpass.getpass(prompt)
     if confirm:
-        if getpass.getpass("Confirm password: ") != password:
+        if getpass.getpass(f"Confirm {prompt.lower()}") != password:
             print("Error: passwords do not match.", file=sys.stderr)
             sys.exit(1)
     return password
@@ -141,26 +149,16 @@ def cmd_put(args: argparse.Namespace) -> None:
         print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
         sys.exit(1)
 
-    if args.stdin:
-        if not args.as_name:
-            print("Error: --as is required when using --stdin.", file=sys.stderr)
-            sys.exit(1)
-        name = args.as_name
-        content = sys.stdin.buffer.read()
-    else:
-        if not args.file:
-            print("Error: specify a source file or use --stdin.", file=sys.stderr)
-            sys.exit(1)
-        source = Path(args.file)
-        if not source.is_file():
-            print(f"Error: '{source}' is not a file.", file=sys.stderr)
-            sys.exit(1)
-        name = args.as_name if args.as_name else source.name
-        try:
-            content = source.read_bytes()
-        except OSError as e:
-            print(f"Error reading file: {e}", file=sys.stderr)
-            sys.exit(1)
+    source = Path(args.file)
+    if not source.is_file():
+        print(f"Error: '{source}' is not a file.", file=sys.stderr)
+        sys.exit(1)
+    name = args.as_name if args.as_name else source.name
+    try:
+        content = source.read_bytes()
+    except OSError as e:
+        print(f"Error reading file: {e}", file=sys.stderr)
+        sys.exit(1)
 
     password = _read_password(args)
 
@@ -171,6 +169,102 @@ def cmd_put(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     print(f"'{name}' added to the container.")
+
+
+def cmd_write(args: argparse.Namespace) -> None:
+    directory = Path(args.dir).resolve()
+    if not directory.is_dir():
+        print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
+        sys.exit(1)
+
+    name = args.as_name
+    content = sys.stdin.buffer.read()
+    password = _read_password(args)
+
+    try:
+        container.put_file(directory, password, name, content)
+    except (JpegFsError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"'{name}' added to the container.")
+
+
+def cmd_get(args: argparse.Namespace) -> None:
+    directory = Path(args.dir).resolve()
+    if not directory.is_dir():
+        print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
+        sys.exit(1)
+
+    output_name = args.as_name if args.as_name else args.name
+    output_path = Path(output_name)
+    password = _read_password(args)
+
+    try:
+        content = container.get_file(directory, password, args.name)
+    except (JpegFsError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        output_path.write_bytes(content)
+    except OSError as e:
+        print(f"Error writing file: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"'{args.name}' extracted to '{output_path}'.")
+
+
+def cmd_read(args: argparse.Namespace) -> None:
+    directory = Path(args.dir).resolve()
+    if not directory.is_dir():
+        print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
+        sys.exit(1)
+
+    password = _read_password(args)
+
+    try:
+        content = container.get_file(directory, password, args.name)
+    except (JpegFsError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    sys.stdout.buffer.write(content)
+
+
+def cmd_del(args: argparse.Namespace) -> None:
+    directory = Path(args.dir).resolve()
+    if not directory.is_dir():
+        print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
+        sys.exit(1)
+
+    password = _read_password(args)
+
+    try:
+        container.del_file(directory, password, args.name)
+    except (JpegFsError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"'{args.name}' deleted from the container.")
+
+
+def cmd_passwd(args: argparse.Namespace) -> None:
+    directory = Path(args.dir).resolve()
+    if not directory.is_dir():
+        print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
+        sys.exit(1)
+
+    old_password = _read_password(args, prompt="Current password: ")
+    new_password = _read_password(args, confirm=True, prompt="New password: ")
+
+    try:
+        container.change_password(directory, old_password, new_password)
+    except (JpegFsError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print("Password changed successfully.")
 
 
 def cmd_wipe(args: argparse.Namespace) -> None:

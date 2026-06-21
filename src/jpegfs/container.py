@@ -1,5 +1,3 @@
-
-
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,6 +5,7 @@ from pathlib import Path
 from . import crypto, jpeg, key_material, payload, shard_metadata
 from .errors import (
     ContainerExistsError,
+    ContainerFileNotFoundError,
     ContainerNotFoundError,
     InsufficientShardsError,
     NoCarriersError,
@@ -35,6 +34,20 @@ def scan_jpeg_files(directory: Path) -> list[Path]:
 
 def has_tail(path: Path) -> bool:
     return len(jpeg.read_tail(path)) >= _TAIL_MIN_SIZE
+
+
+def _verify_password(path: Path, password: str) -> bytes:
+    """Decrypt master_key from a carrier to confirm the password is correct."""
+    tail = jpeg.read_tail(path)
+    km = key_material.KeyMaterial.from_bytes(tail)
+    return km.decrypt_master_key(password)
+
+
+def _two_phase_write(tmp_map: list[tuple[Path, Path]], directory: Path) -> None:
+    """Phase 2 + 3: replace all originals, then fsync directory."""
+    for tmp, original in tmp_map:
+        os.replace(tmp, original)
+    jpeg._fsync_dir(directory)
 
 
 def init(directory: Path, password: str, threshold: int) -> None:
@@ -78,13 +91,6 @@ def init(directory: Path, password: str, threshold: int) -> None:
         )
         tail = km.to_bytes() + sm.encrypt(master_key) + shard
         jpeg.write_tail(path, tail)
-
-
-def _verify_password(path: Path, password: str) -> bytes:
-    """Decrypt master_key from a carrier to confirm the password is correct."""
-    tail = jpeg.read_tail(path)
-    km = key_material.KeyMaterial.from_bytes(tail)
-    return km.decrypt_master_key(password)
 
 
 def load(directory: Path, password: str) -> ContainerState:
@@ -162,9 +168,7 @@ def store(state: ContainerState, new_zip_data: bytes, password: str) -> None:
         new_zip_data, state.master_key, state.threshold, state.shard_total
     )
 
-    # Phase 1: write and fsync all .tmp files.
-    # If anything fails here, clean up and abort — originals are untouched.
-    tmp_map: list[tuple[Path, Path]] = []  # (tmp_path, original_path)
+    tmp_map: list[tuple[Path, Path]] = []
     try:
         for path, shard_index in state.carriers:
             km = key_material.KeyMaterial.create(password, state.master_key)
@@ -186,13 +190,7 @@ def store(state: ContainerState, new_zip_data: bytes, password: str) -> None:
                 pass
         raise
 
-    # Phase 2: atomically replace all originals.
-    for tmp, original in tmp_map:
-        os.replace(tmp, original)
-
-    # Phase 3: fsync directory once.
-    if state.carriers:
-        jpeg._fsync_dir(state.carriers[0][0].parent)
+    _two_phase_write(tmp_map, state.carriers[0][0].parent)
 
 
 def put_file(directory: Path, password: str, name: str, content: bytes) -> None:
@@ -201,11 +199,47 @@ def put_file(directory: Path, password: str, name: str, content: bytes) -> None:
     store(state, new_zip, password)
 
 
-def list_files(directory: Path, password: str) -> list[payload.FileInfo]:
+def get_file(directory: Path, password: str, name: str) -> bytes:
     state = load(directory, password)
-    return payload.zip_list_files_info(state.zip_data)
+    return payload.zip_get_file(state.zip_data, name)
 
 
+def del_file(directory: Path, password: str, name: str) -> None:
+    state = load(directory, password)
+    new_zip = payload.zip_delete_file(state.zip_data, name)
+    store(state, new_zip, password)
+
+
+def change_password(directory: Path, old_password: str, new_password: str) -> None:
+    """Re-encrypt key material on every carrier with the new password."""
+    carriers = [p for p in scan_jpeg_files(directory) if has_tail(p)]
+
+    if not carriers:
+        raise ContainerNotFoundError("No jpegfs container found in the directory.")
+
+    master_key = _verify_password(carriers[0], old_password)
+
+    tmp_map: list[tuple[Path, Path]] = []
+    try:
+        for path in carriers:
+            tail = jpeg.read_tail(path)
+            shard_meta_and_payload = tail[key_material.SIZE:]
+            new_km = key_material.KeyMaterial.create(new_password, master_key)
+            new_tail = new_km.to_bytes() + shard_meta_and_payload
+            tmp = jpeg._write_tmp(path, new_tail)
+            tmp_map.append((tmp, path))
+    except BaseException:
+        for tmp, _ in tmp_map:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
+
+    _two_phase_write(tmp_map, carriers[0].parent)
+
+
+def wipe(directory: Path, password: str) -> int:
     """Remove jpegfs tails from all carrier JPEGs. Returns the number of wiped files."""
     carriers = [p for p in scan_jpeg_files(directory) if has_tail(p)]
 

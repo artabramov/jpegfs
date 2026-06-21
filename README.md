@@ -27,7 +27,9 @@ All commands accept an optional `--dir` argument that specifies the directory co
 
 `passwd` — change the container password. Only the `key material` blocks are re-encrypted. The ZIP archive and shard payloads are not rebuilt.
 
-`put` — add a file to the container. The original filename is used by default (`jpegfs put file1.pdf`), a different name can be specified with `--as` (`jpegfs put file1.pdf --as secret.pdf`), and files can also be created from `stdin` (`jpegfs put --stdin --as secret.pdf`).
+`put` — add a file to the container. The original filename is used by default (`jpegfs put file1.pdf`). A different name can be specified with `--as` (`jpegfs put file1.pdf --as secret.pdf`).
+
+`write` — read file content from `stdin` and store it in the container under the specified name (`jpegfs write --as secret.pdf`).
 
 `get` — extract a file from the container. Files can be extracted using the original name (`jpegfs get file1.pdf`), a different name (`jpegfs get file1.pdf --as copy.pdf`), or written directly to `stdout` (`jpegfs get file1.pdf --stdout`).
 

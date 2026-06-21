@@ -42,6 +42,27 @@ def zip_list_files_info(zip_data: bytes) -> list[FileInfo]:
         ]
 
 
+def zip_get_file(zip_data: bytes, name: str) -> bytes:
+    from .errors import ContainerFileNotFoundError
+    with zipfile.ZipFile(io.BytesIO(zip_data), "r") as zf:
+        if name not in zf.namelist():
+            raise ContainerFileNotFoundError(f"'{name}' not found in the container.")
+        return zf.read(name)
+
+
+def zip_delete_file(zip_data: bytes, name: str) -> bytes:
+    from .errors import ContainerFileNotFoundError
+    if name not in zip_list_files(zip_data):
+        raise ContainerFileNotFoundError(f"'{name}' not found in the container.")
+    new_buf = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(zip_data), "r") as zin:
+        with zipfile.ZipFile(new_buf, "w", compression=zipfile.ZIP_STORED) as zout:
+            for info in zin.infolist():
+                if info.filename != name:
+                    zout.writestr(info, zin.read(info.filename))
+    return new_buf.getvalue()
+
+
 def zip_add_file(zip_data: bytes, name: str, content: bytes) -> bytes:
     from .errors import ContainerFileExistsError
     if name in zip_list_files(zip_data):
