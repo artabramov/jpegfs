@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.17] - 2026-06-21
+
+- Fixed a critical data-corruption bug in `jpeg.py`. The previous `_eoi_end` implementation searched for the last `\xff\xd9` sequence, which could appear inside the encrypted tail and cause incorrect file splitting. Replaced it with a structured JPEG parser that reliably locates the actual EOI marker.
+
 ## [0.1.16] - 2026-06-21
 
 - Split the `get` command into two: `get <name> [--as <output>]` extracts a file to the current directory, and `read <name>` writes the file content to stdout.

@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 
 _SOI = b"\xff\xd8"
-_EOI = b"\xff\xd9"
 
 
 def is_jpeg(path: Path) -> bool:
@@ -16,11 +15,57 @@ def is_jpeg(path: Path) -> bool:
 
 
 def _eoi_end(data: bytes) -> int:
-    """Return the index of the first byte after the last JPEG EOI marker."""
-    pos = data.rfind(_EOI)
-    if pos == -1:
-        raise ValueError(f"JPEG EOI marker not found in file data.")
-    return pos + len(_EOI)
+    """
+    Parse the JPEG structure to find the true EOI marker and return the index
+    of the first byte after it.
+
+    Using rfind(b'\\xff\\xd9') is unreliable: encrypted tail data is random
+    bytes and may contain \\xff\\xd9 by chance, causing rfind to land inside
+    the tail instead of the actual JPEG EOI.
+    """
+    if len(data) < 2 or data[:2] != _SOI:
+        raise ValueError("Not a valid JPEG file (missing SOI).")
+
+    pos = 2  # skip SOI
+
+    while pos < len(data) - 1:
+        if data[pos] != 0xFF:
+            pos += 1
+            continue
+
+        marker = data[pos + 1]
+
+        if marker == 0xD9:  # EOI
+            return pos + 2
+
+        # Standalone markers with no payload: RST0-RST7, SOI, TEM
+        if marker in (0xD8, 0x01) or (0xD0 <= marker <= 0xD7):
+            pos += 2
+            continue
+
+        # All other markers carry a 2-byte length field (length includes itself)
+        if pos + 3 >= len(data):
+            break
+        seg_len = int.from_bytes(data[pos + 2: pos + 4], "big")
+
+        if marker == 0xDA:  # SOS — followed by entropy-coded scan data
+            pos += 2 + seg_len
+            # Scan entropy-coded data until we hit a real marker
+            while pos < len(data) - 1:
+                if data[pos] != 0xFF:
+                    pos += 1
+                elif data[pos + 1] == 0x00:   # byte-stuffed 0xFF, not a marker
+                    pos += 2
+                elif 0xD0 <= data[pos + 1] <= 0xD7:  # restart marker
+                    pos += 2
+                elif data[pos + 1] == 0xD9:   # EOI
+                    return pos + 2
+                else:
+                    break  # start of next segment; fall through to outer loop
+        else:
+            pos += 2 + seg_len
+
+    raise ValueError("JPEG EOI marker not found.")
 
 
 def read_jpeg_body(path: Path) -> bytes:
