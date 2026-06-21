@@ -8,6 +8,7 @@ The system is designed to **remain operational even if some of the JPEG files ar
 
 The project is **not a steganographic system in the traditional sense.** The additional data can be easily detected by examining the contents of a file beyond the JPEG `EOI`. However, the images themselves remain unchanged, and the appended data appears as a cryptographically random sequence of bytes. It contains no plaintext information and does not reveal its purpose or contents without knowledge of the correct password. Even when such data is discovered, it is not possible to determine whether it represents meaningful information, an encrypted container, or simply an arbitrary sequence of bytes.
 
+[![PyPI](https://img.shields.io/pypi/v/jpegfs)](https://pypi.org/project/jpegfs/) [![license](https://img.shields.io/badge/license-GPL--3.0-2f81f7)](./LICENSE)
 
 ## Quick start
 
@@ -154,3 +155,8 @@ src/jpegfs/
 ├── commands.py         init/check/repair/passwd/ls/put/get/del/wipe commands
 └── cli.py              command-line interface and argument parsing
 ```
+
+
+## License
+
+This project is licensed under the **GNU General Public License v3.0** (GPL-3.0). You are free to use, study, modify, and redistribute the software under the terms of the license.
