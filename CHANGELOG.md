@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.14] - 2026-06-21
+
+- Removed the `check` command. Its functionality — container UUID, generation, threshold, and shard availability — is now displayed at the top of the `ls`/`list` output, along with the total container size.
+
 ## [0.1.13] - 2026-06-20
 
 - Added the `ls` and `list` commands. Lists all files stored in the container in a formatted table showing the file name, uncompressed size, and last modified timestamp.

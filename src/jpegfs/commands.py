@@ -1,9 +1,10 @@
 import argparse
 import getpass
 import sys
+import uuid as _uuid
 from pathlib import Path
 
-from . import container
+from . import container, payload
 from .errors import JpegFsError
 
 _HELP_TEXT = """\
@@ -29,10 +30,9 @@ Commands:
       to reconstruct the container. Fails if the directory already contains
       a jpegfs container.
 
-  check
-      Display container information (UUID, generation, threshold, shard count,
-      size) and verify integrity. Checks that enough shards are present, the
-      container can be reconstructed and decrypted, and the ZIP archive is valid.
+  list, ls
+      Display container information (UUID, generation, threshold, available
+      shards) followed by a table of files stored in the container.      
 
   repair
       Restore full shard redundancy. Reconstructs the container from available
@@ -47,9 +47,6 @@ Commands:
   passwd
       Change the container password. Only the key material is re-encrypted;
       the payload is not rebuilt.
-
-  ls, list
-      List files stored in the container.
 
   put <file> [--as <name>]
   put --stdin --as <name>
@@ -96,16 +93,28 @@ def cmd_ls(args: argparse.Namespace) -> None:
     password = _read_password(args)
 
     try:
-        files = container.list_files(directory, password)
+        state = container.load(directory, password)
     except (JpegFsError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
+    files = payload.zip_list_files_info(state.zip_data)
+
+    uuid_str = str(_uuid.UUID(bytes=state.container_uuid))
+    total_size = sum(f.size for f in files)
+
+    print(f"UUID:       {uuid_str}")
+    print(f"Generation: {state.generation}")
+    print(f"Threshold:  {state.threshold}/{state.shard_total}")
+    print(f"Shards:     {len(state.carriers)}/{state.shard_total} available")
+    print(f"Size:       {_fmt_size(total_size)}")
+    print()
+
     if not files:
-        print("Container is empty.")
+        print("No files.")
         return
 
-    name_w = max(len(f.name) for f in files)
+    name_w = max((len(f.name) for f in files), default=4)
     name_w = max(name_w, 4)
     print(f"{'name':<{name_w}}  {'size':>10}  modified")
     print(f"{'-' * name_w}  {'-' * 10}  -------------------")
@@ -113,6 +122,14 @@ def cmd_ls(args: argparse.Namespace) -> None:
         y, mo, d, h, mi, s = f.modified
         modified = f"{y:04d}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}:{s:02d}"
         print(f"{f.name:<{name_w}}  {_fmt_size(f.size):>10}  {modified}")
+
+    print()
+    print(f"{len(files)} file(s)  {_fmt_size(total_size)} total")
+    modified = f"{y:04d}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}:{s:02d}"
+    print(f"{f.name:<{name_w}}  {_fmt_size(f.size):>10}  {modified}")
+
+    print()
+    print(f"{len(files)} file(s)  {_fmt_size(total_size)} total")
 
 
 def _fmt_size(n: int) -> str:
