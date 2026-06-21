@@ -9,6 +9,39 @@ The system is designed to **remain operational even if some of the JPEG files ar
 The project is **not a steganographic system in the traditional sense.** The additional data can be easily detected by examining the contents of a file beyond the JPEG `EOI`. However, the images themselves remain unchanged, and the appended data appears as a cryptographically random sequence of bytes. It contains no plaintext information and does not reveal its purpose or contents without knowledge of the correct password. Even when such data is discovered, it is not possible to determine whether it represents meaningful information, an encrypted container, or simply an arbitrary sequence of bytes.
 
 
+## Quick start
+
+Install the package:
+
+```sh
+pip install jpegfs
+```
+
+Initialize a new container:
+
+```sh
+jpegfs init --threshold 3
+```
+
+Add a file:
+
+```sh
+jpegfs put secret.pdf
+```
+
+List container contents:
+
+```sh
+jpegfs list
+```
+
+Extract a file:
+
+```sh
+jpegfs get secret.pdf
+```
+
+
 ## Commands
 
 All commands accept an optional `--dir` argument that specifies the directory containing the container JPEG files. If omitted, the current directory is used. All commands require a password.
