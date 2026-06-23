@@ -10,6 +10,31 @@ from . import crypto
 
 _NONCE_SIZE = 12
 _LEN_HEADER = 4  # big-endian uint32 prefix storing original ciphertext length
+_NAME_MAX = 255
+
+
+def validate_name(name: str) -> None:
+    """
+    Enforce flat-filesystem naming rules.  Raises ValueError on violations.
+    Rules:
+      - Non-empty
+      - No path separators (/ or \\)
+      - Not a dot-entry (. or ..)
+      - No ASCII control characters (0x00-0x1F, 0x7F)
+      - At most _NAME_MAX bytes when encoded as UTF-8
+    """
+    if not name:
+        raise ValueError("File name must not be empty.")
+    if "/" in name or "\\" in name:
+        raise ValueError(f"File name must not contain path separators: '{name}'.")
+    if name in (".", ".."):
+        raise ValueError(f"File name must not be '.' or '..'.")
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in name):
+        raise ValueError(f"File name must not contain control characters: '{name}'.")
+    if len(name.encode()) > _NAME_MAX:
+        raise ValueError(
+            f"File name too long ({len(name.encode())} bytes, max {_NAME_MAX}): '{name}'."
+        )
 
 
 def create_empty_zip() -> bytes:
@@ -44,6 +69,7 @@ def zip_list_files_info(zip_data: bytes) -> list[FileInfo]:
 
 def zip_get_file(zip_data: bytes, name: str) -> bytes:
     from .errors import ContainerFileNotFoundError
+    validate_name(name)
     with zipfile.ZipFile(io.BytesIO(zip_data), "r") as zf:
         if name not in zf.namelist():
             raise ContainerFileNotFoundError(f"'{name}' not found in the container.")
@@ -52,6 +78,7 @@ def zip_get_file(zip_data: bytes, name: str) -> bytes:
 
 def zip_delete_file(zip_data: bytes, name: str) -> bytes:
     from .errors import ContainerFileNotFoundError
+    validate_name(name)
     if name not in zip_list_files(zip_data):
         raise ContainerFileNotFoundError(f"'{name}' not found in the container.")
     new_buf = io.BytesIO()
@@ -65,6 +92,7 @@ def zip_delete_file(zip_data: bytes, name: str) -> bytes:
 
 def zip_add_file(zip_data: bytes, name: str, content: bytes) -> bytes:
     from .errors import ContainerFileExistsError
+    validate_name(name)
     if name in zip_list_files(zip_data):
         raise ContainerFileExistsError(
             f"'{name}' already exists in the container. Delete it first."

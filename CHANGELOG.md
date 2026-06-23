@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.18] - 2026-06-23
+
+- Fixed `init` atomicity. Previously, carrier JPEG files were updated one at a time, leaving the container partially initialized if the process was interrupted. The operation now follows the same two-phase write strategy as `store()`: all temporary files are written and fsynced first, then atomically replace the originals, followed by a single directory fsync.
+- Fixed `wipe` atomicity. Previously, carrier JPEG files were cleaned one at a time, leaving the container partially wiped if the process was interrupted. The operation now follows the same two-phase write strategy as `store()`.
+- Fixed `change_password()` to operate only on carriers belonging to the current recoverable container generation. Previously, it could process stale, foreign, or corrupted container data present in the same directory.
+- Added file-name validation in `payload.py`. ZIP operations now reject invalid file names, including empty names, path separators, `.` and `..`, ASCII control characters, and names whose UTF-8 encoding exceeds 255 bytes.
+
 ## [0.1.17] - 2026-06-21
 
 - Fixed a critical data-corruption bug in `jpeg.py`. The previous `_eoi_end` implementation searched for the last `\xff\xd9` sequence, which could appear inside the encrypted tail and cause incorrect file splitting. Replaced it with a structured JPEG parser that reliably locates the actual EOI marker.

@@ -80,17 +80,29 @@ def init(directory: Path, password: str, threshold: int) -> None:
     empty_zip = payload.create_empty_zip()
     shards = payload.encode(empty_zip, master_key, threshold, n)
 
-    for i, (path, shard) in enumerate(zip(carriers, shards)):
-        km = key_material.KeyMaterial.create(password, master_key)
-        sm = shard_metadata.ShardMetadata(
-            container_uuid=container_uuid,
-            container_generation=generation,
-            container_threshold=threshold,
-            shard_index=i,
-            shard_total=n,
-        )
-        tail = km.to_bytes() + sm.encrypt(master_key) + shard
-        jpeg.write_tail(path, tail)
+    tmp_map: list[tuple[Path, Path]] = []
+    try:
+        for i, (path, shard) in enumerate(zip(carriers, shards)):
+            km = key_material.KeyMaterial.create(password, master_key)
+            sm = shard_metadata.ShardMetadata(
+                container_uuid=container_uuid,
+                container_generation=generation,
+                container_threshold=threshold,
+                shard_index=i,
+                shard_total=n,
+            )
+            tail = km.to_bytes() + sm.encrypt(master_key) + shard
+            tmp = jpeg._write_tmp(path, tail)
+            tmp_map.append((tmp, path))
+    except BaseException:
+        for tmp, _ in tmp_map:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
+
+    _two_phase_write(tmp_map, carriers[0].parent)
 
 
 def load(directory: Path, password: str) -> ContainerState:
@@ -211,20 +223,15 @@ def del_file(directory: Path, password: str, name: str) -> None:
 
 
 def change_password(directory: Path, old_password: str, new_password: str) -> None:
-    """Re-encrypt key material on every carrier with the new password."""
-    carriers = [p for p in scan_jpeg_files(directory) if has_tail(p)]
-
-    if not carriers:
-        raise ContainerNotFoundError("No jpegfs container found in the directory.")
-
-    master_key = _verify_password(carriers[0], old_password)
+    """Re-encrypt key material on the carriers of the current generation."""
+    state = load(directory, old_password)
 
     tmp_map: list[tuple[Path, Path]] = []
     try:
-        for path in carriers:
+        for path, _ in state.carriers:
             tail = jpeg.read_tail(path)
             shard_meta_and_payload = tail[key_material.SIZE:]
-            new_km = key_material.KeyMaterial.create(new_password, master_key)
+            new_km = key_material.KeyMaterial.create(new_password, state.master_key)
             new_tail = new_km.to_bytes() + shard_meta_and_payload
             tmp = jpeg._write_tmp(path, new_tail)
             tmp_map.append((tmp, path))
@@ -236,7 +243,7 @@ def change_password(directory: Path, old_password: str, new_password: str) -> No
                 pass
         raise
 
-    _two_phase_write(tmp_map, carriers[0].parent)
+    _two_phase_write(tmp_map, state.carriers[0][0].parent)
 
 
 def repair(directory: Path, password: str) -> tuple[int, int, int]:
@@ -295,7 +302,18 @@ def wipe(directory: Path, password: str) -> int:
 
     _verify_password(carriers[0], password)
 
-    for path in carriers:
-        jpeg.write_tail(path, b"")
+    tmp_map: list[tuple[Path, Path]] = []
+    try:
+        for path in carriers:
+            tmp = jpeg._write_tmp(path, b"")
+            tmp_map.append((tmp, path))
+    except BaseException:
+        for tmp, _ in tmp_map:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
 
+    _two_phase_write(tmp_map, carriers[0].parent)
     return len(carriers)
