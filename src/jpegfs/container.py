@@ -106,50 +106,88 @@ def init(directory: Path, password: str, threshold: int) -> None:
 
 
 def load(directory: Path, password: str) -> ContainerState:
-    """Reconstruct the container from available shards."""
+    """
+    Reconstruct a jpegfs container from the JPEG files in a directory.
+
+    All JPEG files containing jpegfs tails are scanned and grouped by
+    container UUID and generation. The function attempts to derive the
+    master key from available carriers using the supplied password and
+    selects the newest recoverable container generation for which at
+    least the required number of shards is available.
+
+    Stale, foreign, corrupted, or incomplete container data present in
+    the same directory is ignored.
+
+    Args:
+        directory: Directory containing carrier JPEG files.
+        password: Container password.
+
+    Returns:
+        ContainerState describing the recovered container.
+
+    Raises:
+        ContainerNotFoundError: No jpegfs container data was found.
+        InvalidPasswordError: The password does not match any recoverable
+            container present in the directory.
+        InsufficientShardsError: No recoverable container generation has
+            enough shards to reconstruct the payload.
+    """
     with_tails = [p for p in scan_jpeg_files(directory) if has_tail(p)]
 
     if not with_tails:
         raise ContainerNotFoundError("No jpegfs container found in the directory.")
 
-    master_key = _verify_password(with_tails[0], password)
+    candidates: list[tuple[bytes, dict[tuple, dict]]] = []
 
-    shard_info: dict[tuple, dict] = {}
-
-    for path in with_tails:
-        tail = jpeg.read_tail(path)
+    for key_path in with_tails:
         try:
-            sm = shard_metadata.ShardMetadata.from_encrypted(
-                tail[key_material.SIZE:], master_key
-            )
+            master_key = _verify_password(key_path, password)
         except Exception:
             continue
 
-        shard_bytes = tail[key_material.SIZE + shard_metadata.SIZE:]
-        gen_key = (sm.container_uuid, sm.container_generation)
+        shard_info: dict[tuple, dict] = {}
 
-        if gen_key not in shard_info:
-            shard_info[gen_key] = {
-                "uuid": sm.container_uuid,
-                "generation": sm.container_generation,
-                "threshold": sm.container_threshold,
-                "total": sm.shard_total,
-                "shards": {},
-                "carrier_map": {},
-            }
+        for path in with_tails:
+            tail = jpeg.read_tail(path)
+            try:
+                sm = shard_metadata.ShardMetadata.from_encrypted(
+                    tail[key_material.SIZE:], master_key
+                )
+            except Exception:
+                continue
 
-        info = shard_info[gen_key]
-        info["shards"][sm.shard_index] = shard_bytes
-        info["carrier_map"][sm.shard_index] = path
+            shard_bytes = tail[key_material.SIZE + shard_metadata.SIZE:]
+            gen_key = (sm.container_uuid, sm.container_generation)
+
+            if gen_key not in shard_info:
+                shard_info[gen_key] = {
+                    "uuid": sm.container_uuid,
+                    "generation": sm.container_generation,
+                    "threshold": sm.container_threshold,
+                    "total": sm.shard_total,
+                    "shards": {},
+                    "carrier_map": {},
+                }
+
+            info = shard_info[gen_key]
+            info["shards"][sm.shard_index] = shard_bytes
+            info["carrier_map"][sm.shard_index] = path
+
+        candidates.append((master_key, shard_info))
 
     best = None
-    for gen_key in sorted(shard_info, key=lambda x: x[1], reverse=True):
-        info = shard_info[gen_key]
-        if len(info["shards"]) >= info["threshold"]:
-            best = info
-            break
+    best_master_key = None
 
-    if best is None:
+    for master_key, shard_info in candidates:
+        for gen_key in sorted(shard_info, key=lambda x: x[1], reverse=True):
+            info = shard_info[gen_key]
+            if len(info["shards"]) >= info["threshold"]:
+                if best is None or info["generation"] > best["generation"]:
+                    best = info
+                    best_master_key = master_key
+                break
+
+    if best is None or best_master_key is None:
         raise InsufficientShardsError("Not enough shards to reconstruct the container.")
 
     k = best["threshold"]
@@ -157,13 +195,13 @@ def load(directory: Path, password: str) -> ContainerState:
     available = sorted(best["shards"])[:k]
 
     zip_data = payload.decode(
-        [best["shards"][i] for i in available], available, master_key, k, n
+        [best["shards"][i] for i in available], available, best_master_key, k, n
     )
 
     carriers = [(best["carrier_map"][i], i) for i in sorted(best["carrier_map"])]
 
     return ContainerState(
-        master_key=master_key,
+        master_key=best_master_key,
         container_uuid=best["uuid"],
         generation=best["generation"],
         threshold=k,
@@ -294,13 +332,34 @@ def repair(directory: Path, password: str) -> tuple[int, int, int]:
 
 
 def wipe(directory: Path, password: str) -> int:
-    """Remove jpegfs tails from all carrier JPEGs. Returns the number of wiped files."""
-    carriers = [p for p in scan_jpeg_files(directory) if has_tail(p)]
+    """
+    Remove jpegfs data from all carriers belonging to the current
+    recoverable container generation.
 
-    if not carriers:
-        raise ContainerNotFoundError("No jpegfs container found in the directory.")
+    The function first loads the container using the supplied password and
+    identifies the newest recoverable generation. Only carriers that belong
+    to that generation are modified. Stale generations, foreign containers,
+    and unrelated JPEG files present in the same directory are left untouched.
 
-    _verify_password(carriers[0], password)
+    Carrier files are updated atomically using the same two-phase write
+    strategy as container updates: all temporary files are written and
+    fsynced first, then atomically replace the originals, followed by a
+    single directory fsync.
+
+    Args:
+        directory: Directory containing carrier JPEG files.
+        password: Container password.
+
+    Returns:
+        Number of carrier files from which jpegfs data was removed.
+
+    Raises:
+        ContainerNotFoundError: No jpegfs container was found.
+        InvalidPasswordError: The password is invalid.
+        InsufficientShardsError: No recoverable container generation exists.
+    """
+    state = load(directory, password)
+    carriers = [path for path, _ in state.carriers]
 
     tmp_map: list[tuple[Path, Path]] = []
     try:

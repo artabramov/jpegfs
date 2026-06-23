@@ -4,39 +4,96 @@ The project is a file container that uses a collection of JPEG files as a distri
 
 User files are encrypted with a randomly generated master key and split into redundant shards using erasure coding. A set of JPEG files is then selected, and additional data is appended to each file after the JPEG `EOI` (End of Image) marker. This data includes cryptographic material, encrypted shard metadata, and one of the data shards. With the correct password, files can be added to, extracted from, read from, and written to the container directly, including through standard input/output streams.
 
-The system is designed to **remain operational even if some of the JPEG files are lost.** As long as a sufficient number of shards remain available, the entire container can be reconstructed and any lost redundancy can be regenerated.
+**The container remains recoverable even if some of the JPEG files are lost.** As long as a sufficient number of shards remain available, the container payload can be reconstructed and any lost redundancy can be regenerated.
 
-The project is **not a steganographic system in the traditional sense.** The additional data can be easily detected by examining the contents of a file beyond the JPEG `EOI`. However, the images themselves remain unchanged, and the appended data appears as a cryptographically random sequence of bytes. It contains no plaintext information and does not reveal its purpose or contents without knowledge of the correct password. Even when such data is discovered, it is not possible to determine whether it represents meaningful information, an encrypted container, or simply an arbitrary sequence of bytes.
+The project is **not a steganographic system in the traditional sense.** The additional data can be easily detected by examining the contents of a file beyond the JPEG `EOI`. However, the images themselves remain unchanged, and the appended data appears as a cryptographically random sequence of bytes. It contains no plaintext information and does not reveal its purpose or contents without knowledge of the correct password. Even when such data is discovered, the data appears indistinguishable from random noise.
 
 [![PyPI](https://img.shields.io/pypi/v/jpegfs)](https://pypi.org/project/jpegfs/) [![license](https://img.shields.io/badge/license-GPL--3.0-2f81f7)](./LICENSE)
 
+
+## Threat model
+
+The primary goal of jpegfs is to protect data at rest and provide
+recoverability in the event of carrier file loss.
+
+What is protected:
+
+- **Loss of some carrier JPEG files.** As long as at least the required
+  number of shards remains available, the container can be reconstructed
+  and missing redundancy can be regenerated.
+
+- **Unauthorized access to carrier files.** Without the correct password,
+  an attacker cannot recover the master key, decrypt the container
+  contents, or determine whether the appended data represents a valid
+  jpegfs container or arbitrary encrypted bytes.
+
+- **Disclosure of individual carrier files.** A single JPEG file contains
+  only one shard of the encrypted payload and does not provide access to
+  the stored data on its own.
+
+- **Disclosure of all carrier files.** An attacker may recover the
+  encrypted container payload but cannot decrypt it without the password.
+
+What is not protected:
+
+- **Compromised host system.** An attacker with access to the running
+  process, process memory, keyboard input, or decrypted data can obtain
+  information regardless of the container format.
+
+- **Weak passwords.** The security of the encrypted master key ultimately
+  depends on the strength of the password supplied by the user.
+
+- **JPEG processing software.** Many image editors, optimizers,
+  converters, cloud services, and social media platforms rewrite JPEG
+  files and may remove any data appended after the JPEG EOI marker,
+  permanently destroying container data stored in those files.
+
+- **Memory disclosure.** During container operations, decrypted data,
+  encryption keys, and shard material exist in process memory and may be
+  exposed through swap files, hibernation files, crash dumps, or memory
+  inspection.
+
+- **jpegfs is not a steganographic system.** Additional data is appended
+  after the JPEG EOI marker and can be detected by anyone inspecting the
+  file structure. The project does not attempt to hide the presence of
+  container data. This data is encrypted and appears indistinguishable
+  from random bytes, preventing recovery of the container contents without
+  the correct password.
+
+
 ## Quick start
 
-Install the package:
+Install jpegfs from PyPI:
 
 ```sh
 pip install jpegfs
 ```
 
-Initialize a new container:
+Display the command-line help:
+
+```sh
+jpegfs --help
+```
+
+Create a new container using JPEG files as carriers:
 
 ```sh
 jpegfs init --threshold 3
 ```
 
-Add a file:
+Add a file to the container:
 
 ```sh
 jpegfs put secret.pdf
 ```
 
-List container contents:
+List files stored in the container:
 
 ```sh
 jpegfs list
 ```
 
-Extract a file:
+Extract a file from the container:
 
 ```sh
 jpegfs get secret.pdf
@@ -136,6 +193,8 @@ Any operation that modifies files stored in the container requires rebuilding th
 6. After all temporary files have been written successfully, replace the original files using `os.replace(tmp, original)`.
 7. Call `fsync(directory)`.
 
+Each container update creates a new `container_generation`. During reconstruction jpegfs selects the newest generation for which at least the required number of shards is available. Older generations may remain present in carrier files but are ignored.
+
 Changing the password does not require rebuilding the ZIP archive or shard payloads. Only the `key material` block of each JPEG file is re-encrypted.
 
 
@@ -152,7 +211,7 @@ src/jpegfs/
 ├── shard_metadata.py   54-byte encrypted shard metadata format
 ├── payload.py          ZIP, encryption, and zfec encoding/decoding
 ├── container.py        container assembly and reconstruction logic
-├── commands.py         init/check/repair/passwd/ls/put/get/del/wipe commands
+├── commands.py         console commands
 └── cli.py              command-line interface and argument parsing
 ```
 
