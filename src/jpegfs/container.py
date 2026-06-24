@@ -29,10 +29,38 @@ class ContainerState:
 
 
 def scan_jpeg_files(directory: Path) -> list[Path]:
-    return sorted(p for p in directory.iterdir() if p.is_file() and jpeg.is_jpeg(p))
+    """
+    Scan a directory for JPEG carrier files.
+
+    Only regular files recognized as JPEG images are returned. The result
+    is sorted to ensure deterministic carrier ordering during container
+    creation and reconstruction.
+
+    Args:
+        directory: Directory to scan.
+
+    Returns:
+        A sorted list of JPEG file paths.
+    """
+    return sorted(
+        p for p in directory.iterdir() if p.is_file() and jpeg.is_jpeg(p)
+    )
 
 
 def has_tail(path: Path) -> bool:
+    """
+    Check whether a JPEG file contains a jpegfs tail.
+
+    The check is based solely on the size of the data located after the
+    JPEG EOI marker. Tails smaller than the minimum jpegfs metadata size
+    are ignored.
+
+    Args:
+        path: Path to a JPEG file.
+
+    Returns:
+        True if the file appears to contain a jpegfs tail, otherwise False.
+    """
     return len(jpeg.read_tail(path)) >= _TAIL_MIN_SIZE
 
 
@@ -51,6 +79,33 @@ def _two_phase_write(tmp_map: list[tuple[Path, Path]], directory: Path) -> None:
 
 
 def init(directory: Path, password: str, threshold: int) -> None:
+    """
+    Initialize a new jpegfs container in a directory of JPEG files.
+
+    The function scans the directory for JPEG files, verifies that none
+    of them already contains a jpegfs tail, creates an empty encrypted
+    payload, splits it into erasure-coded shards, and appends one shard
+    plus the required key material and metadata to each carrier.
+
+    Each carrier is first written to a temporary file. The original JPEG
+    files are replaced only after all temporary files have been created
+    successfully. A crash during the final replacement phase may still
+    leave the directory with a partially initialized container; such a
+    container should be wiped before running initialization again.
+
+    Args:
+        directory: Directory containing JPEG carrier files.
+        password: Password used to protect the container master key.
+        threshold: Minimum number of shards required to reconstruct.
+
+    Raises:
+        NoCarriersError: If the directory contains no JPEG files.
+        ValueError: If threshold is less than 1.
+        NotEnoughCarriersError: If threshold exceeds the number of JPEG files.
+        ContainerExistsError: If any carrier already contains a jpegfs tail.
+        OSError: If temporary files cannot be written or carrier files cannot
+            be replaced.
+    """
     carriers = scan_jpeg_files(directory)
 
     if not carriers:

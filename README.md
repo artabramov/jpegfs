@@ -204,15 +204,15 @@ Changing the password does not require rebuilding the ZIP archive or shard paylo
 src/jpegfs/
 ├── __init__.py
 ├── __main__.py
-├── errors.py           custom exceptions
-├── crypto.py           KDF, AEAD, and random byte generation
-├── jpeg.py             EOI detection and tail read/write operations
-├── key_material.py     76-byte key material format
-├── shard_metadata.py   54-byte encrypted shard metadata format
-├── payload.py          ZIP, encryption, and zfec encoding/decoding
-├── container.py        container assembly and reconstruction logic
-├── commands.py         console commands
-└── cli.py              command-line interface and argument parsing
+├── cli.py             command-line interface and argument parsing
+├── commands.py        console commands
+├── container.py       container assembly and reconstruction logic
+├── crypto.py          KDF, AEAD, and random byte generation
+├── errors.py          custom exceptions
+├── jpeg.py            EOI detection and tail read/write operations
+├── key_material.py    76-byte key material format
+├── payload.py         ZIP, encryption, and zfec encoding/decoding
+└── shard_metadata.py  54-byte encrypted shard metadata format
 ```
 
 
