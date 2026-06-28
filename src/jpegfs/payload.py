@@ -15,13 +15,10 @@ _NAME_MAX = 255
 
 def validate_name(name: str) -> None:
     """
-    Enforce flat-filesystem naming rules.  Raises ValueError on violations.
-    Rules:
-      - Non-empty
-      - No path separators (/ or \\)
-      - Not a dot-entry (. or ..)
-      - No ASCII control characters (0x00-0x1F, 0x7F)
-      - At most _NAME_MAX bytes when encoded as UTF-8
+    Validate a flat container file name.
+
+    Rejects empty names, path separators, dot entries, control
+    characters, and UTF-8 names longer than the allowed limit.
     """
     if not name:
         raise ValueError("File name must not be empty.")
@@ -38,6 +35,12 @@ def validate_name(name: str) -> None:
 
 
 def create_empty_zip() -> bytes:
+    """
+    Create an empty ZIP payload for a new container.
+
+    Returns valid ZIP bytes using stored entries without compression,
+    ready to be encrypted and split into shards.
+    """
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED):
         pass
@@ -55,11 +58,23 @@ class FileInfo:
 
 
 def zip_list_files(zip_data: bytes) -> list[str]:
+    """
+    Return file names stored in a ZIP payload.
+
+    Reads the decrypted payload as a ZIP archive and returns
+    the archive entry names in ZIP order.
+    """
     with zipfile.ZipFile(io.BytesIO(zip_data), "r") as zf:
         return zf.namelist()
 
 
 def zip_list_files_info(zip_data: bytes) -> list[FileInfo]:
+    """
+    Return metadata for files stored in a ZIP payload.
+
+    Reads ZIP entry information and returns file name, size,
+    and modification timestamp for each stored file.
+    """
     with zipfile.ZipFile(io.BytesIO(zip_data), "r") as zf:
         return [
             FileInfo(name=info.filename, size=info.file_size, modified=info.date_time)
@@ -68,6 +83,12 @@ def zip_list_files_info(zip_data: bytes) -> list[FileInfo]:
 
 
 def zip_get_file(zip_data: bytes, name: str) -> bytes:
+    """
+    Read one file from a ZIP payload.
+
+    Validates the requested name, checks that the entry exists,
+    and returns its stored bytes.
+    """
     from .errors import ContainerFileNotFoundError
     validate_name(name)
     with zipfile.ZipFile(io.BytesIO(zip_data), "r") as zf:
@@ -77,6 +98,12 @@ def zip_get_file(zip_data: bytes, name: str) -> bytes:
 
 
 def zip_delete_file(zip_data: bytes, name: str) -> bytes:
+    """
+    Remove one file from a ZIP payload.
+
+    Copies all entries except the requested one into a new
+    stored-mode ZIP archive and returns the resulting bytes.
+    """
     from .errors import ContainerFileNotFoundError
     validate_name(name)
     if name not in zip_list_files(zip_data):
@@ -91,6 +118,12 @@ def zip_delete_file(zip_data: bytes, name: str) -> bytes:
 
 
 def zip_add_file(zip_data: bytes, name: str, content: bytes) -> bytes:
+    """
+    Add a new file to a ZIP payload.
+
+    Validates the name, rejects duplicates, copies existing entries,
+    and writes the new file into a fresh stored-mode ZIP archive.
+    """
     from .errors import ContainerFileExistsError
     validate_name(name)
     if name in zip_list_files(zip_data):
@@ -107,7 +140,12 @@ def zip_add_file(zip_data: bytes, name: str, content: bytes) -> bytes:
 
 
 def encode(zip_data: bytes, master_key: bytes, k: int, n: int) -> list[bytes]:
-    """ZIP bytes -> list of n shards."""
+    """
+    Encrypt ZIP payload bytes and split them into shards.
+
+    Frames the ciphertext length, pads it for erasure coding,
+    and returns the full set of encoded shard bytes.
+    """
     nonce = crypto.random_bytes(_NONCE_SIZE)
     ciphertext = nonce + crypto.encrypt(master_key, nonce, zip_data)
 
@@ -125,7 +163,12 @@ def encode(zip_data: bytes, master_key: bytes, k: int, n: int) -> list[bytes]:
 
 
 def decode(shards: list[bytes | None], indices: list[int], master_key: bytes, k: int, n: int) -> bytes:
-    """At least k shards + their indices -> original ZIP bytes."""
+    """
+    Reconstruct and decrypt ZIP payload bytes from shards.
+
+    Uses at least the threshold number of shards, removes framing
+    and padding, then decrypts the recovered ciphertext.
+    """
     from .errors import InsufficientShardsError
 
     available = [(s, i) for s, i in zip(shards, indices) if s is not None]

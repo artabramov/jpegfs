@@ -9,6 +9,12 @@ from .commands import (
 
 
 def _version() -> str:
+    """
+    Return the installed jpegfs package version.
+    
+    Falls back to "unknown" when package metadata is not available, for
+    example when the project is run directly from source.
+    """
     try:
         return version("jpegfs")
     except PackageNotFoundError:
@@ -16,6 +22,12 @@ def _version() -> str:
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
+    """
+    Add common command-line options to a subcommand parser.
+
+    Registers the container directory option and optional password-file
+    input used by all jpegfs commands.
+    """
     parser.add_argument(
         "--dir",
         default=".",
@@ -30,6 +42,12 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 
 
 def main() -> None:
+    """
+    Parse command-line arguments and execute the selected command.
+
+    Builds the jpegfs CLI, handles help and version output, and
+    dispatches control to the chosen command handler.
+    """
     parser = argparse.ArgumentParser(
         prog="jpegfs",
         add_help=False,

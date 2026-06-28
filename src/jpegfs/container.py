@@ -30,17 +30,10 @@ class ContainerState:
 
 def scan_jpeg_files(directory: Path) -> list[Path]:
     """
-    Scan a directory for JPEG carrier files.
+    Find usable JPEG carrier files in a directory.
 
-    Only regular files recognized as JPEG images are returned. The result
-    is sorted to ensure deterministic carrier ordering during container
-    creation and reconstruction.
-
-    Args:
-        directory: Directory to scan.
-
-    Returns:
-        A sorted list of JPEG file paths.
+    Returns only regular files that start with a JPEG SOI marker,
+    sorted for deterministic shard placement.
     """
     return sorted(
         p for p in directory.iterdir() if p.is_file() and jpeg.is_jpeg(p)
@@ -49,30 +42,33 @@ def scan_jpeg_files(directory: Path) -> list[Path]:
 
 def has_tail(path: Path) -> bool:
     """
-    Check whether a JPEG file contains a jpegfs tail.
+    Check whether a JPEG file appears to contain jpegfs data.
 
-    The check is based solely on the size of the data located after the
-    JPEG EOI marker. Tails smaller than the minimum jpegfs metadata size
-    are ignored.
-
-    Args:
-        path: Path to a JPEG file.
-
-    Returns:
-        True if the file appears to contain a jpegfs tail, otherwise False.
+    Reads bytes appended after the JPEG EOI marker and treats
+    large enough tails as possible container metadata.
     """
     return len(jpeg.read_tail(path)) >= _TAIL_MIN_SIZE
 
 
 def _verify_password(path: Path, password: str) -> bytes:
-    """Decrypt master_key from a carrier to confirm the password is correct."""
+    """
+    Verify a password against one carrier's key material.
+
+    Reads the appended key block from a JPEG tail and attempts
+    to decrypt the protected container master key.
+    """
     tail = jpeg.read_tail(path)
     km = key_material.KeyMaterial.from_bytes(tail)
     return km.decrypt_master_key(password)
 
 
 def _two_phase_write(tmp_map: list[tuple[Path, Path]], directory: Path) -> None:
-    """Phase 2 + 3: replace all originals, then fsync directory."""
+    """
+    Replace prepared temporary files with their final paths.
+
+    Performs the final atomic replacement phase for carrier updates
+    and fsyncs the containing directory afterward.
+    """
     for tmp, original in tmp_map:
         os.replace(tmp, original)
     jpeg._fsync_dir(directory)
@@ -80,31 +76,10 @@ def _two_phase_write(tmp_map: list[tuple[Path, Path]], directory: Path) -> None:
 
 def init(directory: Path, password: str, threshold: int) -> None:
     """
-    Initialize a new jpegfs container in a directory of JPEG files.
+    Create a new encrypted container across JPEG carriers.
 
-    The function scans the directory for JPEG files, verifies that none
-    of them already contains a jpegfs tail, creates an empty encrypted
-    payload, splits it into erasure-coded shards, and appends one shard
-    plus the required key material and metadata to each carrier.
-
-    Each carrier is first written to a temporary file. The original JPEG
-    files are replaced only after all temporary files have been created
-    successfully. A crash during the final replacement phase may still
-    leave the directory with a partially initialized container; such a
-    container should be wiped before running initialization again.
-
-    Args:
-        directory: Directory containing JPEG carrier files.
-        password: Password used to protect the container master key.
-        threshold: Minimum number of shards required to reconstruct.
-
-    Raises:
-        NoCarriersError: If the directory contains no JPEG files.
-        ValueError: If threshold is less than 1.
-        NotEnoughCarriersError: If threshold exceeds the number of JPEG files.
-        ContainerExistsError: If any carrier already contains a jpegfs tail.
-        OSError: If temporary files cannot be written or carrier files cannot
-            be replaced.
+    Builds an empty ZIP payload, encrypts and splits it into shards,
+    then appends key material, metadata, and shard data to each JPEG.
     """
     carriers = scan_jpeg_files(directory)
 
@@ -162,30 +137,10 @@ def init(directory: Path, password: str, threshold: int) -> None:
 
 def load(directory: Path, password: str) -> ContainerState:
     """
-    Reconstruct a jpegfs container from the JPEG files in a directory.
+    Load the newest recoverable container from a directory.
 
-    All JPEG files containing jpegfs tails are scanned and grouped by
-    container UUID and generation. The function attempts to derive the
-    master key from available carriers using the supplied password and
-    selects the newest recoverable container generation for which at
-    least the required number of shards is available.
-
-    Stale, foreign, corrupted, or incomplete container data present in
-    the same directory is ignored.
-
-    Args:
-        directory: Directory containing carrier JPEG files.
-        password: Container password.
-
-    Returns:
-        ContainerState describing the recovered container.
-
-    Raises:
-        ContainerNotFoundError: No jpegfs container data was found.
-        InvalidPasswordError: The password does not match any recoverable
-            container present in the directory.
-        InsufficientShardsError: No recoverable container generation has
-            enough shards to reconstruct the payload.
+    Scans carrier tails, groups valid shards by UUID and generation,
+    and reconstructs the latest generation that has enough shards.
     """
     with_tails = [p for p in scan_jpeg_files(directory) if has_tail(p)]
 
@@ -267,7 +222,12 @@ def load(directory: Path, password: str) -> ContainerState:
 
 
 def store(state: ContainerState, new_zip_data: bytes, password: str) -> None:
-    """Write updated container to all carriers with generation + 1."""
+    """
+    Persist updated ZIP data as a new container generation.
+
+    Encrypts the payload, creates fresh shards and metadata,
+    then rewrites all current carrier tails atomically.
+    """
     new_generation = state.generation + 1
     new_shards = payload.encode(
         new_zip_data, state.master_key, state.threshold, state.shard_total
@@ -299,24 +259,47 @@ def store(state: ContainerState, new_zip_data: bytes, password: str) -> None:
 
 
 def put_file(directory: Path, password: str, name: str, content: bytes) -> None:
+    """
+    Add a new file to an existing container.
+
+    Loads the current container, inserts the file into the ZIP payload,
+    and stores the resulting payload as the next generation.
+    """
     state = load(directory, password)
     new_zip = payload.zip_add_file(state.zip_data, name, content)
     store(state, new_zip, password)
 
 
 def get_file(directory: Path, password: str, name: str) -> bytes:
+    """
+    Read one file from an existing container.
+
+    Loads and decrypts the container, validates the requested name,
+    and returns the stored file contents as bytes.
+    """
     state = load(directory, password)
     return payload.zip_get_file(state.zip_data, name)
 
 
 def del_file(directory: Path, password: str, name: str) -> None:
+    """
+    Remove one file from an existing container.
+
+    Loads the current payload, deletes the named ZIP entry,
+    and writes the updated payload back to the carriers.
+    """
     state = load(directory, password)
     new_zip = payload.zip_delete_file(state.zip_data, name)
     store(state, new_zip, password)
 
 
 def change_password(directory: Path, old_password: str, new_password: str) -> None:
-    """Re-encrypt key material on the carriers of the current generation."""
+    """
+    Change the password protecting carrier key material.
+
+    Loads the container with the old password and rewrites only
+    the encrypted master-key blocks using the new password.
+    """
     state = load(directory, old_password)
 
     tmp_map: list[tuple[Path, Path]] = []
@@ -341,11 +324,10 @@ def change_password(directory: Path, old_password: str, new_password: str) -> No
 
 def repair(directory: Path, password: str) -> tuple[int, int, int]:
     """
-    Rebuild the container across ALL JPEG files currently in the directory,
-    incorporating any new clean files and recovering from lost shards.
+    Rebuild the container across all JPEG files in the directory.
 
-    Returns (old_available, old_total, new_total) so the caller can report
-    what changed.
+    Uses the current recoverable payload to create a fresh generation,
+    including new clean carriers and restoring missing redundancy.
     """
     state = load(directory, password)
     all_jpegs = scan_jpeg_files(directory)
@@ -388,30 +370,10 @@ def repair(directory: Path, password: str) -> tuple[int, int, int]:
 
 def wipe(directory: Path, password: str) -> int:
     """
-    Remove jpegfs data from all carriers belonging to the current
-    recoverable container generation.
+    Remove jpegfs tails from the current recoverable generation.
 
-    The function first loads the container using the supplied password and
-    identifies the newest recoverable generation. Only carriers that belong
-    to that generation are modified. Stale generations, foreign containers,
-    and unrelated JPEG files present in the same directory are left untouched.
-
-    Carrier files are updated atomically using the same two-phase write
-    strategy as container updates: all temporary files are written and
-    fsynced first, then atomically replace the originals, followed by a
-    single directory fsync.
-
-    Args:
-        directory: Directory containing carrier JPEG files.
-        password: Container password.
-
-    Returns:
-        Number of carrier files from which jpegfs data was removed.
-
-    Raises:
-        ContainerNotFoundError: No jpegfs container was found.
-        InvalidPasswordError: The password is invalid.
-        InsufficientShardsError: No recoverable container generation exists.
+    Clears appended container data only from carriers that belong
+    to the loaded generation, leaving unrelated JPEG files untouched.
     """
     state = load(directory, password)
     carriers = [path for path, _ in state.carriers]

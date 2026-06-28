@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.20] - 2026-06-28
+
+- Added comprehensive docstrings for public modules, functions, and methods across the project. Improved overall code documentation and developer experience.
+
 ## [0.1.19] - 2026-06-28
 
 - Added `smoke tests` covering the complete container lifecycle, including initialization, file operations, password changes, recovery, and wipe.

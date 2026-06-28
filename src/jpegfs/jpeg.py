@@ -7,6 +7,12 @@ _SOI = b"\xff\xd8"
 
 
 def is_jpeg(path: Path) -> bool:
+    """
+    Check whether a file begins with a JPEG SOI marker.
+
+    Returns False when the file cannot be opened or does not
+    start with the expected JPEG header bytes.
+    """
     try:
         with open(path, "rb") as f:
             return f.read(2) == _SOI
@@ -16,12 +22,10 @@ def is_jpeg(path: Path) -> bool:
 
 def _eoi_end(data: bytes) -> int:
     """
-    Parse the JPEG structure to find the true EOI marker and return the index
-    of the first byte after it.
+    Find the true end of the JPEG image data.
 
-    Using rfind(b'\\xff\\xd9') is unreliable: encrypted tail data is random
-    bytes and may contain \\xff\\xd9 by chance, causing rfind to land inside
-    the tail instead of the actual JPEG EOI.
+    Parses JPEG markers instead of searching backward, so random
+    encrypted tail bytes cannot be mistaken for the EOI marker.
     """
     if len(data) < 2 or data[:2] != _SOI:
         raise ValueError("Not a valid JPEG file (missing SOI).")
@@ -69,26 +73,48 @@ def _eoi_end(data: bytes) -> int:
 
 
 def read_jpeg_body(path: Path) -> bytes:
+    """
+    Read the valid JPEG body without appended tail data.
+
+    Returns bytes from the beginning of the file through the real
+    JPEG EOI marker, excluding any jpegfs data after it.
+    """
     with open(path, "rb") as f:
         data = f.read()
     return data[:_eoi_end(data)]
 
 
 def read_tail(path: Path) -> bytes:
+    """
+    Read bytes appended after the JPEG EOI marker.
+
+    Returns only the post-image tail area where jpegfs stores
+    key material, shard metadata, and shard payload data.
+    """
     with open(path, "rb") as f:
         data = f.read()
     return data[_eoi_end(data):]
 
 
 def write_tail(path: Path, tail: bytes) -> None:
-    """Atomically replace the tail of a single JPEG file."""
+    """
+    Atomically replace the appended tail of a JPEG file.
+
+    Preserves the original JPEG body, writes the new tail through
+    a temporary file, and fsyncs the directory after replacement.
+    """
     tmp = _write_tmp(path, tail)
     os.replace(tmp, path)
     _fsync_dir(path.parent)
 
 
 def _write_tmp(path: Path, tail: bytes) -> Path:
-    """Write JPEG body + tail to a .tmp file and fsync it. Returns the tmp path."""
+    """
+    Write a temporary JPEG file with a replacement tail.
+
+    Copies the valid JPEG body, appends the supplied tail bytes,
+    fsyncs the file, and returns the temporary path.
+    """
     jpeg_body = read_jpeg_body(path)
     tmp = path.with_suffix(path.suffix + ".tmp")
     try:
@@ -106,6 +132,12 @@ def _write_tmp(path: Path, tail: bytes) -> Path:
 
 
 def _fsync_dir(directory: Path) -> None:
+    """
+    Best-effort fsync for a directory path.
+
+    Flushes directory metadata after file replacement and silently
+    ignores platforms or filesystems where this operation fails.
+    """
     try:
         fd = os.open(str(directory), os.O_RDONLY)
         try:

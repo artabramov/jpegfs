@@ -68,11 +68,23 @@ Commands:
 
 
 def cmd_help(args: argparse.Namespace) -> None:
+    """
+    Print the built-in jpegfs help text.
+
+    Outputs the full command overview directly to stdout
+    without invoking argparse's generated help formatter.
+    """
     print(_HELP_TEXT, end="")
 
 
 def _read_password(args: argparse.Namespace, confirm: bool = False,
                    prompt: str = "Password: ") -> str:
+    """
+    Read a password from a file or from the terminal.
+
+    When confirmation is requested, prompts twice and exits
+    if the entered passwords do not match.
+    """
     if getattr(args, "password_file", None):
         try:
             with open(args.password_file, encoding="utf-8") as f:
@@ -90,6 +102,12 @@ def _read_password(args: argparse.Namespace, confirm: bool = False,
 
 
 def cmd_ls(args: argparse.Namespace) -> None:
+    """
+    List files stored in an encrypted jpegfs container.
+
+    Loads the container, prints container metadata, and displays
+    stored file names, sizes, modification times, and total size.
+    """
     directory = Path(args.dir).resolve()
     if not directory.is_dir():
         print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
@@ -133,6 +151,12 @@ def cmd_ls(args: argparse.Namespace) -> None:
 
 
 def _fmt_size(n: int) -> str:
+    """
+    Format a byte count as a readable size string.
+
+    Uses binary scaling through KB, MB, GB, and TB,
+    while keeping plain bytes unrounded.
+    """
     for unit in ("B", "KB", "MB", "GB"):
         if n < 1024:
             return f"{n} {unit}" if unit == "B" else f"{n:.1f} {unit}"
@@ -141,6 +165,12 @@ def _fmt_size(n: int) -> str:
 
 
 def cmd_put(args: argparse.Namespace) -> None:
+    """
+    Add a local file to the encrypted container.
+
+    Reads the source file from disk, optionally stores it under
+    a different name, and persists the updated container state.
+    """
     directory = Path(args.dir).resolve()
     if not directory.is_dir():
         print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
@@ -169,6 +199,12 @@ def cmd_put(args: argparse.Namespace) -> None:
 
 
 def cmd_write(args: argparse.Namespace) -> None:
+    """
+    Store stdin data as a file in the encrypted container.
+
+    Reads raw bytes from standard input and writes them under
+    the required container file name.
+    """
     directory = Path(args.dir).resolve()
     if not directory.is_dir():
         print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
@@ -188,6 +224,12 @@ def cmd_write(args: argparse.Namespace) -> None:
 
 
 def cmd_get(args: argparse.Namespace) -> None:
+    """
+    Extract a container file to the local filesystem.
+
+    Loads the requested file from the encrypted container
+    and writes it to the selected output path.
+    """
     directory = Path(args.dir).resolve()
     if not directory.is_dir():
         print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
@@ -213,6 +255,12 @@ def cmd_get(args: argparse.Namespace) -> None:
 
 
 def cmd_read(args: argparse.Namespace) -> None:
+    """
+    Write a stored container file to stdout.
+
+    Retrieves the requested file from the encrypted container
+    and streams its raw bytes to standard output.
+    """
     directory = Path(args.dir).resolve()
     if not directory.is_dir():
         print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
@@ -230,6 +278,12 @@ def cmd_read(args: argparse.Namespace) -> None:
 
 
 def cmd_del(args: argparse.Namespace) -> None:
+    """
+    Delete a file from the encrypted container.
+
+    Loads the current container state, removes the requested entry,
+    and saves the updated payload back to the carriers.
+    """
     directory = Path(args.dir).resolve()
     if not directory.is_dir():
         print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
@@ -247,6 +301,12 @@ def cmd_del(args: argparse.Namespace) -> None:
 
 
 def cmd_passwd(args: argparse.Namespace) -> None:
+    """
+    Change the password for an existing container.
+
+    Verifies the current password and re-encrypts carrier key
+    material with the newly entered password.
+    """
     directory = Path(args.dir).resolve()
     if not directory.is_dir():
         print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
@@ -265,6 +325,12 @@ def cmd_passwd(args: argparse.Namespace) -> None:
 
 
 def cmd_wipe(args: argparse.Namespace) -> None:
+    """
+    Remove jpegfs data from the current container generation.
+
+    Loads the recoverable container and clears appended jpegfs tails
+    from the carrier files that belong to it.
+    """
     directory = Path(args.dir).resolve()
     if not directory.is_dir():
         print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
@@ -282,6 +348,12 @@ def cmd_wipe(args: argparse.Namespace) -> None:
 
 
 def cmd_repair(args: argparse.Namespace) -> None:
+    """
+    Restore full shard redundancy for the container.
+
+    Rebuilds the current payload across all JPEG files in the directory
+    and reports how the available shard set changed.
+    """
     directory = Path(args.dir).resolve()
     if not directory.is_dir():
         print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
@@ -305,6 +377,12 @@ def cmd_repair(args: argparse.Namespace) -> None:
 
 
 def cmd_init(args: argparse.Namespace) -> None:
+    """
+    Initialize a new jpegfs container in a JPEG directory.
+
+    Reads and confirms the password, validates the target directory,
+    and creates encrypted shards across the available carrier files.
+    """
     directory = Path(args.dir).resolve()
     if not directory.is_dir():
         print(f"Error: '{directory}' is not a directory.", file=sys.stderr)

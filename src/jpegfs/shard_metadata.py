@@ -23,6 +23,12 @@ class ShardMetadata:
     shard_total: int           # uint16
 
     def encrypt(self, master_key: bytes) -> bytes:
+        """
+        Encrypt shard metadata for storage in a carrier tail.
+
+        Serializes UUID, generation, threshold, shard index, and total
+        shard count, then protects them with the container master key.
+        """
         nonce = crypto.random_bytes(_NONCE_SIZE)
         plaintext = struct.pack(
             _STRUCT,
@@ -36,6 +42,12 @@ class ShardMetadata:
 
     @classmethod
     def from_encrypted(cls, data: bytes, master_key: bytes) -> "ShardMetadata":
+        """
+        Decrypt and parse shard metadata from tail bytes.
+
+        Validates the encrypted metadata block size, decrypts it with
+        the master key, and returns the structured shard metadata.
+        """
         if len(data) < SIZE:
             raise ValueError(f"Shard metadata too short: {len(data)} < {SIZE}.")
         nonce = data[:_NONCE_SIZE]
