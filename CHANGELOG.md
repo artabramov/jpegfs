@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.19] - 2026-06-28
+
+- Added `smoke tests` covering the complete container lifecycle, including initialization, file operations, password changes, recovery, and wipe.
+
 ## [0.1.18] - 2026-06-23
 
 - Fixed `init` atomicity. Previously, carrier JPEG files were updated one at a time, leaving the container partially initialized if the process was interrupted. The operation now follows the same two-phase write strategy as `store()`: all temporary files are written and fsynced first, then atomically replace the originals, followed by a single directory fsync.
