@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "jpegfs"
-version = "0.1.18"
+version = "0.1.19"
 description = "Encrypted file container distributed across JPEG files"
 keywords = ["jpeg", "encryption", "security", "erasure-coding", "cli"]
 readme = "README.md"
