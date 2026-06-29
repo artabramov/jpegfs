@@ -103,6 +103,25 @@ class TestContainerInit(unittest.TestCase):
             with self.assertRaises(InvalidPasswordError):
                 container.load(directory, "wrong")
 
+    def test_load_prefers_newest_recoverable_generation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            _make_carriers(directory, 3)
+            container.init(directory, PASSWORD, 2)
+
+            stale_carrier = directory / "0.jpg"
+            stale_bytes = stale_carrier.read_bytes()
+
+            container.put_file(directory, PASSWORD, "hello.txt", b"hello")
+            stale_carrier.write_bytes(stale_bytes)
+
+            state = container.load(directory, PASSWORD)
+            self.assertEqual(state.container_generation, 2)
+            self.assertEqual(
+                container.get_file(directory, PASSWORD, "hello.txt"),
+                b"hello",
+            )
+
 
 class TestContainerFileOps(unittest.TestCase):
 

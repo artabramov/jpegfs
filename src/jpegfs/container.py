@@ -5,7 +5,6 @@ from pathlib import Path
 from . import crypto, jpeg, key_material, payload, shard_metadata
 from .errors import (
     ContainerExistsError,
-    ContainerFileNotFoundError,
     ContainerNotFoundError,
     InsufficientShardsError,
     InvalidPasswordError,
@@ -26,6 +25,22 @@ class ContainerState:
     shard_total: int           # 2 bytes
     carriers: list[tuple[Path, int]]  # (path, shard_index)
     zip_data: bytes
+
+
+@dataclass
+class _GenerationInfo:
+    """
+    Reconstructable shard set for one container generation.
+
+    Stores shard payloads and their source carriers for a specific
+    `(container_uuid, container_generation)` pair.
+    """
+    container_uuid: bytes
+    container_generation: int
+    container_threshold: int
+    shard_total: int
+    shards: dict[int, bytes]
+    carrier_map: dict[int, Path]
 
 
 def scan_jpeg_files(directory: Path) -> list[Path]:
@@ -50,18 +65,6 @@ def has_tail(path: Path) -> bool:
     return len(jpeg.read_tail(path)) > 0
 
 
-def _verify_password(path: Path, password: str) -> bytes:
-    """
-    Verify a password against one carrier's key material.
-
-    Reads the appended key block from a JPEG tail and attempts
-    to decrypt the protected container master key.
-    """
-    tail = jpeg.read_tail(path)
-    km = key_material.KeyMaterial.from_bytes(tail)
-    return km.decrypt_master_key(password)
-
-
 def _two_phase_write(tmp_map: list[tuple[Path, Path]], directory: Path) -> None:
     """
     Replace prepared temporary files with their final paths.
@@ -72,6 +75,71 @@ def _two_phase_write(tmp_map: list[tuple[Path, Path]], directory: Path) -> None:
     for tmp, original in tmp_map:
         os.replace(tmp, original)
     jpeg._fsync_dir(directory)
+
+
+def _cleanup_tmp_files(tmp_map: list[tuple[Path, Path]]) -> None:
+    """
+    Best-effort removal of temporary carrier files.
+
+    Used during failed update phases to avoid leaving stale `.tmp`
+    files near carrier JPEGs.
+    """
+    for tmp, _ in tmp_map:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _rewrite_carrier_tails(updates: list[tuple[Path, bytes]]) -> None:
+    """
+    Atomically rewrite tails for a set of carrier files.
+
+    Writes all temporary files first and replaces originals only after
+    every temporary write succeeds.
+    """
+    if not updates:
+        return
+
+    tmp_map: list[tuple[Path, Path]] = []
+    try:
+        for path, tail in updates:
+            tmp = jpeg._write_tmp(path, tail)
+            tmp_map.append((tmp, path))
+    except BaseException:
+        _cleanup_tmp_files(tmp_map)
+        raise
+
+    _two_phase_write(tmp_map, updates[0][0].parent)
+
+
+def _build_tail(
+    password: str,
+    master_key: bytes,
+    metadata: shard_metadata.ShardMetadata,
+    shard_bytes: bytes,
+) -> bytes:
+    """
+    Build one complete carrier tail.
+
+    Combines key material, encrypted shard metadata, and shard payload
+    in the on-disk jpegfs tail layout.
+    """
+    km = key_material.KeyMaterial.create(password, master_key)
+    return km.to_bytes() + metadata.encrypt(master_key) + shard_bytes
+
+
+def _latest_recoverable_generation(
+    generations: dict[tuple[bytes, int], _GenerationInfo]
+) -> _GenerationInfo | None:
+    """
+    Pick the newest generation with enough shards for decoding.
+    """
+    for key in sorted(generations, key=lambda x: x[1], reverse=True):
+        info = generations[key]
+        if len(info.shards) >= info.container_threshold:
+            return info
+    return None
 
 
 def init(directory: Path, password: str, container_threshold: int) -> None:
@@ -110,29 +178,17 @@ def init(directory: Path, password: str, container_threshold: int) -> None:
     empty_zip = payload.create_empty_zip()
     shards = payload.encode(empty_zip, master_key, container_threshold, n)
 
-    tmp_map: list[tuple[Path, Path]] = []
-    try:
-        for i, (path, shard) in enumerate(zip(carriers, shards)):
-            km = key_material.KeyMaterial.create(password, master_key)
-            sm = shard_metadata.ShardMetadata(
-                container_uuid=container_uuid,
-                container_generation=container_generation,
-                container_threshold=container_threshold,
-                shard_index=i,
-                shard_total=n,
-            )
-            tail = km.to_bytes() + sm.encrypt(master_key) + shard
-            tmp = jpeg._write_tmp(path, tail)
-            tmp_map.append((tmp, path))
-    except BaseException:
-        for tmp, _ in tmp_map:
-            try:
-                tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
-        raise
-
-    _two_phase_write(tmp_map, carriers[0].parent)
+    updates: list[tuple[Path, bytes]] = []
+    for i, (path, shard) in enumerate(zip(carriers, shards)):
+        sm = shard_metadata.ShardMetadata(
+            container_uuid=container_uuid,
+            container_generation=container_generation,
+            container_threshold=container_threshold,
+            shard_index=i,
+            shard_total=n,
+        )
+        updates.append((path, _build_tail(password, master_key, sm, shard)))
+    _rewrite_carrier_tails(updates)
 
 
 def load(directory: Path, password: str) -> ContainerState:
@@ -147,21 +203,22 @@ def load(directory: Path, password: str) -> ContainerState:
     if not with_tails:
         raise ContainerNotFoundError("No jpegfs container found in the directory.")
 
-    candidates: list[tuple[bytes, dict[tuple, dict]]] = []
+    tails = {path: jpeg.read_tail(path) for path in with_tails}
+    candidates: list[tuple[bytes, dict[tuple[bytes, int], _GenerationInfo]]] = []
     password_verified = False
 
-    for key_path in with_tails:
+    for key_path, key_tail in tails.items():
         try:
-            master_key = _verify_password(key_path, password)
+            km = key_material.KeyMaterial.from_bytes(key_tail)
+            master_key = km.decrypt_master_key(password)
         except Exception:
             continue
 
         password_verified = True
 
-        shard_info: dict[tuple, dict] = {}
+        shard_info: dict[tuple[bytes, int], _GenerationInfo] = {}
 
-        for path in with_tails:
-            tail = jpeg.read_tail(path)
+        for path, tail in tails.items():
             try:
                 sm = shard_metadata.ShardMetadata.from_encrypted(
                     tail[key_material.SIZE:], master_key
@@ -173,53 +230,52 @@ def load(directory: Path, password: str) -> ContainerState:
             gen_key = (sm.container_uuid, sm.container_generation)
 
             if gen_key not in shard_info:
-                shard_info[gen_key] = {
-                    "uuid": sm.container_uuid,
-                    "generation": sm.container_generation,
-                    "threshold": sm.container_threshold,
-                    "total": sm.shard_total,
-                    "shards": {},
-                    "carrier_map": {},
-                }
+                shard_info[gen_key] = _GenerationInfo(
+                    container_uuid=sm.container_uuid,
+                    container_generation=sm.container_generation,
+                    container_threshold=sm.container_threshold,
+                    shard_total=sm.shard_total,
+                    shards={},
+                    carrier_map={},
+                )
 
             info = shard_info[gen_key]
-            info["shards"][sm.shard_index] = shard_bytes
-            info["carrier_map"][sm.shard_index] = path
+            info.shards[sm.shard_index] = shard_bytes
+            info.carrier_map[sm.shard_index] = path
 
         candidates.append((master_key, shard_info))
 
     if not password_verified:
         raise InvalidPasswordError("Invalid password or corrupted data.")
 
-    best = None
+    best: _GenerationInfo | None = None
     best_master_key = None
 
     for master_key, shard_info in candidates:
-        for gen_key in sorted(shard_info, key=lambda x: x[1], reverse=True):
-            info = shard_info[gen_key]
-            if len(info["shards"]) >= info["threshold"]:
-                if best is None or info["generation"] > best["generation"]:
-                    best = info
-                    best_master_key = master_key
-                break
+        info = _latest_recoverable_generation(shard_info)
+        if info is None:
+            continue
+        if best is None or info.container_generation > best.container_generation:
+            best = info
+            best_master_key = master_key
 
     if best is None or best_master_key is None:
         raise InsufficientShardsError("Not enough shards to reconstruct the container.")
 
-    k = best["threshold"]
-    n = best["total"]
-    available = sorted(best["shards"])[:k]
+    k = best.container_threshold
+    n = best.shard_total
+    available = sorted(best.shards)[:k]
 
     zip_data = payload.decode(
-        [best["shards"][i] for i in available], available, best_master_key, k, n
+        [best.shards[i] for i in available], available, best_master_key, k, n
     )
 
-    carriers = [(best["carrier_map"][i], i) for i in sorted(best["carrier_map"])]
+    carriers = [(best.carrier_map[i], i) for i in sorted(best.carrier_map)]
 
     return ContainerState(
         master_key=best_master_key,
-        container_uuid=best["uuid"],
-        container_generation=best["generation"],
+        container_uuid=best.container_uuid,
+        container_generation=best.container_generation,
         container_threshold=k,
         shard_total=n,
         carriers=carriers,
@@ -239,29 +295,19 @@ def store(state: ContainerState, new_zip_data: bytes, password: str) -> None:
         new_zip_data, state.master_key, state.container_threshold, state.shard_total
     )
 
-    tmp_map: list[tuple[Path, Path]] = []
-    try:
-        for path, shard_index in state.carriers:
-            km = key_material.KeyMaterial.create(password, state.master_key)
-            sm = shard_metadata.ShardMetadata(
-                container_uuid=state.container_uuid,
-                container_generation=new_generation,
-                container_threshold=state.container_threshold,
-                shard_index=shard_index,
-                shard_total=state.shard_total,
-            )
-            tail = km.to_bytes() + sm.encrypt(state.master_key) + new_shards[shard_index]
-            tmp = jpeg._write_tmp(path, tail)
-            tmp_map.append((tmp, path))
-    except BaseException:
-        for tmp, _ in tmp_map:
-            try:
-                tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
-        raise
-
-    _two_phase_write(tmp_map, state.carriers[0][0].parent)
+    updates: list[tuple[Path, bytes]] = []
+    for path, shard_index in state.carriers:
+        sm = shard_metadata.ShardMetadata(
+            container_uuid=state.container_uuid,
+            container_generation=new_generation,
+            container_threshold=state.container_threshold,
+            shard_index=shard_index,
+            shard_total=state.shard_total,
+        )
+        updates.append(
+            (path, _build_tail(password, state.master_key, sm, new_shards[shard_index]))
+        )
+    _rewrite_carrier_tails(updates)
 
 
 def put_file(directory: Path, password: str, name: str, content: bytes) -> None:
@@ -308,24 +354,13 @@ def change_password(directory: Path, old_password: str, new_password: str) -> No
     """
     state = load(directory, old_password)
 
-    tmp_map: list[tuple[Path, Path]] = []
-    try:
-        for path, _ in state.carriers:
-            tail = jpeg.read_tail(path)
-            shard_meta_and_payload = tail[key_material.SIZE:]
-            new_km = key_material.KeyMaterial.create(new_password, state.master_key)
-            new_tail = new_km.to_bytes() + shard_meta_and_payload
-            tmp = jpeg._write_tmp(path, new_tail)
-            tmp_map.append((tmp, path))
-    except BaseException:
-        for tmp, _ in tmp_map:
-            try:
-                tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
-        raise
-
-    _two_phase_write(tmp_map, state.carriers[0][0].parent)
+    updates: list[tuple[Path, bytes]] = []
+    for path, _ in state.carriers:
+        tail = jpeg.read_tail(path)
+        shard_meta_and_payload = tail[key_material.SIZE:]
+        new_km = key_material.KeyMaterial.create(new_password, state.master_key)
+        updates.append((path, new_km.to_bytes() + shard_meta_and_payload))
+    _rewrite_carrier_tails(updates)
 
 
 def repair(directory: Path, password: str) -> tuple[int, int, int]:
@@ -348,29 +383,17 @@ def repair(directory: Path, password: str) -> tuple[int, int, int]:
     new_generation = state.container_generation + 1
     new_shards = payload.encode(state.zip_data, state.master_key, state.container_threshold, new_n)
 
-    tmp_map: list[tuple[Path, Path]] = []
-    try:
-        for i, path in enumerate(all_jpegs):
-            km = key_material.KeyMaterial.create(password, state.master_key)
-            sm = shard_metadata.ShardMetadata(
-                container_uuid=state.container_uuid,
-                container_generation=new_generation,
-                container_threshold=state.container_threshold,
-                shard_index=i,
-                shard_total=new_n,
-            )
-            tail = km.to_bytes() + sm.encrypt(state.master_key) + new_shards[i]
-            tmp = jpeg._write_tmp(path, tail)
-            tmp_map.append((tmp, path))
-    except BaseException:
-        for tmp, _ in tmp_map:
-            try:
-                tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
-        raise
-
-    _two_phase_write(tmp_map, all_jpegs[0].parent)
+    updates: list[tuple[Path, bytes]] = []
+    for i, path in enumerate(all_jpegs):
+        sm = shard_metadata.ShardMetadata(
+            container_uuid=state.container_uuid,
+            container_generation=new_generation,
+            container_threshold=state.container_threshold,
+            shard_index=i,
+            shard_total=new_n,
+        )
+        updates.append((path, _build_tail(password, state.master_key, sm, new_shards[i])))
+    _rewrite_carrier_tails(updates)
     return len(state.carriers), state.shard_total, new_n
 
 
@@ -384,18 +407,5 @@ def wipe(directory: Path, password: str) -> int:
     state = load(directory, password)
     carriers = [path for path, _ in state.carriers]
 
-    tmp_map: list[tuple[Path, Path]] = []
-    try:
-        for path in carriers:
-            tmp = jpeg._write_tmp(path, b"")
-            tmp_map.append((tmp, path))
-    except BaseException:
-        for tmp, _ in tmp_map:
-            try:
-                tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
-        raise
-
-    _two_phase_write(tmp_map, carriers[0].parent)
+    _rewrite_carrier_tails([(path, b"") for path in carriers])
     return len(carriers)
