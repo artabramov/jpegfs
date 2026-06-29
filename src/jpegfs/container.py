@@ -8,6 +8,7 @@ from .errors import (
     ContainerFileNotFoundError,
     ContainerNotFoundError,
     InsufficientShardsError,
+    InvalidPasswordError,
     NoCarriersError,
     NotEnoughCarriersError,
 )
@@ -148,12 +149,17 @@ def load(directory: Path, password: str) -> ContainerState:
         raise ContainerNotFoundError("No jpegfs container found in the directory.")
 
     candidates: list[tuple[bytes, dict[tuple, dict]]] = []
+    password_verified = False
 
     for key_path in with_tails:
         try:
             master_key = _verify_password(key_path, password)
+        except InvalidPasswordError:
+            continue
         except Exception:
             continue
+
+        password_verified = True
 
         shard_info: dict[tuple, dict] = {}
 
@@ -184,6 +190,9 @@ def load(directory: Path, password: str) -> ContainerState:
             info["carrier_map"][sm.shard_index] = path
 
         candidates.append((master_key, shard_info))
+
+    if not password_verified:
+        raise InvalidPasswordError("Invalid password or corrupted data.")
 
     best = None
     best_master_key = None
