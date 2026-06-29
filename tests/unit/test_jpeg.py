@@ -52,6 +52,15 @@ class TestJpeg(unittest.TestCase):
 
             self.assertEqual(path.read_bytes(), JPEG_BODY + b"new-tail")
 
+    def test_read_tail_ignores_false_eoi_in_tail(self):
+        fake_eoi_tail = b"\xff\xd9" + b"real-tail"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "image.jpg"
+            path.write_bytes(JPEG_BODY + fake_eoi_tail)
+
+            self.assertEqual(jpeg.read_jpeg_body(path), JPEG_BODY)
+            self.assertEqual(jpeg.read_tail(path), fake_eoi_tail)
+
 
 if __name__ == "__main__":
     unittest.main()

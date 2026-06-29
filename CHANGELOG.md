@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.21] - 2026-06-29
+
+- Added `unit tests`, including a regression test for false `\xff\xd9` sequences inside encrypted tails.
+- Fixed `load()` to report `Invalid password or corrupted data` when the password fails on every carrier. After the multi-carrier password scan was introduced, a wrong password could be misreported as `Not enough shards to reconstruct the container`.
+- Simplified `has_tail()` to treat any bytes appended after the JPEG EOI marker as a possible jpegfs tail.
+
 ## [0.1.20] - 2026-06-28
 
 - Added comprehensive docstrings for public modules, functions, and methods across the project. Improved overall code documentation and developer experience.

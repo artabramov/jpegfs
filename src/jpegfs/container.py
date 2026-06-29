@@ -153,8 +153,6 @@ def load(directory: Path, password: str) -> ContainerState:
     for key_path in with_tails:
         try:
             master_key = _verify_password(key_path, password)
-        except InvalidPasswordError:
-            continue
         except Exception:
             continue
 
