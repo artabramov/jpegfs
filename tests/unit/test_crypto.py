@@ -29,6 +29,21 @@ class TestCrypto(unittest.TestCase):
         ciphertext = crypto.encrypt(key, nonce, plaintext)
         self.assertEqual(crypto.decrypt(key, nonce, ciphertext), plaintext)
 
+    def test_encrypt_prefixed_decrypt_prefixed_roundtrip(self):
+        key = crypto.random_bytes(32)
+        plaintext = b"prefixed"
+
+        blob = crypto.encrypt_prefixed(key, plaintext)
+        self.assertEqual(crypto.decrypt_prefixed(key, blob), plaintext)
+        self.assertGreaterEqual(len(blob), crypto.NONCE_SIZE + 16)
+
+    def test_decrypt_prefixed_with_wrong_key_raises_invalid_password(self):
+        key = crypto.random_bytes(32)
+        blob = crypto.encrypt_prefixed(key, b"secret")
+
+        with self.assertRaises(InvalidPasswordError):
+            crypto.decrypt_prefixed(crypto.random_bytes(32), blob)
+
     def test_decrypt_with_wrong_key_raises_invalid_password(self):
         key = crypto.random_bytes(32)
         nonce = crypto.random_bytes(12)

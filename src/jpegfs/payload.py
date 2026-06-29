@@ -14,7 +14,6 @@ from .errors import (
     InsufficientShardsError,
 )
 
-_NONCE_SIZE = 12
 _LEN_HEADER = 4  # big-endian uint32 prefix storing original ciphertext length
 _NAME_MAX = 255
 
@@ -190,8 +189,7 @@ def encode(zip_data: bytes, master_key: bytes, k: int, n: int) -> list[bytes]:
     Frames the ciphertext length, pads it for erasure coding,
     and returns the full set of encoded shard bytes.
     """
-    nonce = crypto.random_bytes(_NONCE_SIZE)
-    ciphertext = nonce + crypto.encrypt(master_key, nonce, zip_data)
+    ciphertext = crypto.encrypt_prefixed(master_key, zip_data)
 
     # Prepend original length so decode can strip padding after reassembly.
     framed = struct.pack(">I", len(ciphertext)) + ciphertext
@@ -225,6 +223,4 @@ def decode(shards: list[bytes | None], indices: list[int], master_key: bytes, k:
     original_len = struct.unpack(">I", framed[:_LEN_HEADER])[0]
     ciphertext = framed[_LEN_HEADER:_LEN_HEADER + original_len]
 
-    nonce = ciphertext[:_NONCE_SIZE]
-    encrypted = ciphertext[_NONCE_SIZE:]
-    return crypto.decrypt(master_key, nonce, encrypted)
+    return crypto.decrypt_prefixed(master_key, ciphertext)

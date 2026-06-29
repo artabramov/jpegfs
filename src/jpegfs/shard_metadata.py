@@ -5,11 +5,10 @@ from dataclasses import dataclass
 
 from . import crypto
 
-_NONCE_SIZE = 12
 _PLAINTEXT_SIZE = 26
 _ENCRYPTED_SIZE = _PLAINTEXT_SIZE + 16  # + AEAD tag = 42
 
-SIZE = _NONCE_SIZE + _ENCRYPTED_SIZE  # 54
+SIZE = crypto.NONCE_SIZE + _ENCRYPTED_SIZE  # 54
 
 _STRUCT = ">16sIHHH"
 
@@ -29,7 +28,6 @@ class ShardMetadata:
         Serializes UUID, generation, threshold, shard index, and total
         shard count, then protects them with the container master key.
         """
-        nonce = crypto.random_bytes(_NONCE_SIZE)
         plaintext = struct.pack(
             _STRUCT,
             self.container_uuid,
@@ -38,7 +36,7 @@ class ShardMetadata:
             self.shard_index,
             self.shard_total,
         )
-        return nonce + crypto.encrypt(master_key, nonce, plaintext)
+        return crypto.encrypt_prefixed(master_key, plaintext)
 
     @classmethod
     def from_encrypted(cls, data: bytes, master_key: bytes) -> "ShardMetadata":
@@ -50,9 +48,7 @@ class ShardMetadata:
         """
         if len(data) < SIZE:
             raise ValueError(f"Shard metadata too short: {len(data)} < {SIZE}.")
-        nonce = data[:_NONCE_SIZE]
-        encrypted = data[_NONCE_SIZE:SIZE]
-        plaintext = crypto.decrypt(master_key, nonce, encrypted)
+        plaintext = crypto.decrypt_prefixed(master_key, data[:SIZE])
         uuid_, generation, threshold, shard_index, shard_total = struct.unpack(
             _STRUCT, plaintext
         )

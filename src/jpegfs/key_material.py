@@ -3,10 +3,9 @@ from dataclasses import dataclass
 from . import crypto
 
 _SALT_SIZE = 16
-_NONCE_SIZE = 12
 _ENCRYPTED_KEY_SIZE = 48  # 32-byte master_key + 16-byte AEAD tag
 
-SIZE = _SALT_SIZE + _NONCE_SIZE + _ENCRYPTED_KEY_SIZE  # 76
+SIZE = _SALT_SIZE + crypto.NONCE_SIZE + _ENCRYPTED_KEY_SIZE  # 76
 
 
 @dataclass(frozen=True)
@@ -24,7 +23,7 @@ class KeyMaterial:
         and encrypts the container master key for storage in a carrier.
         """
         salt = crypto.random_bytes(_SALT_SIZE)
-        key_nonce = crypto.random_bytes(_NONCE_SIZE)
+        key_nonce = crypto.random_bytes(crypto.NONCE_SIZE)
         derived = crypto.derive_key(password, salt)
         encrypted = crypto.encrypt(derived, key_nonce, master_key)
         return cls(salt=salt, key_nonce=key_nonce, encrypted_master_key=encrypted)
@@ -50,8 +49,8 @@ class KeyMaterial:
             raise ValueError(f"Key material too short: {len(data)} < {SIZE}.")
         return cls(
             salt=data[:_SALT_SIZE],
-            key_nonce=data[_SALT_SIZE:_SALT_SIZE + _NONCE_SIZE],
-            encrypted_master_key=data[_SALT_SIZE + _NONCE_SIZE:SIZE],
+            key_nonce=data[_SALT_SIZE:_SALT_SIZE + crypto.NONCE_SIZE],
+            encrypted_master_key=data[_SALT_SIZE + crypto.NONCE_SIZE:SIZE],
         )
 
     def decrypt_master_key(self, password: str) -> bytes:

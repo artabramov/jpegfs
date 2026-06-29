@@ -12,6 +12,7 @@ _SCRYPT_N = 2 ** 16
 _SCRYPT_R = 8
 _SCRYPT_P = 1
 _KEY_LENGTH = 32
+NONCE_SIZE = 12
 
 
 def random_bytes(n: int) -> bytes:
@@ -45,6 +46,17 @@ def encrypt(key: bytes, nonce: bytes, plaintext: bytes) -> bytes:
     return ChaCha20Poly1305(key).encrypt(nonce, plaintext, None)
 
 
+def encrypt_prefixed(key: bytes, plaintext: bytes) -> bytes:
+    """
+    Encrypt plaintext and prefix the generated nonce.
+
+    Produces `nonce || ciphertext_with_tag` using the project
+    nonce size, so callers can store one contiguous blob.
+    """
+    nonce = random_bytes(NONCE_SIZE)
+    return nonce + encrypt(key, nonce, plaintext)
+
+
 def decrypt(key: bytes, nonce: bytes, ciphertext: bytes) -> bytes:
     """
     Decrypt ChaCha20-Poly1305 ciphertext.
@@ -56,3 +68,12 @@ def decrypt(key: bytes, nonce: bytes, ciphertext: bytes) -> bytes:
         return ChaCha20Poly1305(key).decrypt(nonce, ciphertext, None)
     except InvalidTag:
         raise InvalidPasswordError("Invalid password or corrupted data.")
+
+
+def decrypt_prefixed(key: bytes, blob: bytes) -> bytes:
+    """
+    Decrypt data stored as `nonce || ciphertext_with_tag`.
+    """
+    nonce = blob[:NONCE_SIZE]
+    ciphertext = blob[NONCE_SIZE:]
+    return decrypt(key, nonce, ciphertext)
