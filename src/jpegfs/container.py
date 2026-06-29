@@ -43,6 +43,18 @@ class _GenerationInfo:
     carrier_map: dict[int, Path]
 
 
+@dataclass
+class _LoadCandidate:
+    """
+    One password-verified decryption candidate.
+
+    Holds the recovered master key and generations that were
+    successfully parsed with that key.
+    """
+    master_key: bytes
+    generations: dict[tuple[bytes, int], _GenerationInfo]
+
+
 def scan_jpeg_files(directory: Path) -> list[Path]:
     """
     Find usable JPEG carrier files in a directory.
@@ -142,6 +154,117 @@ def _latest_recoverable_generation(
     return None
 
 
+def _collect_generations_for_master_key(
+    tails: dict[Path, bytes], master_key: bytes
+) -> dict[tuple[bytes, int], _GenerationInfo]:
+    """
+    Parse all carrier tails using a candidate master key.
+
+    Returns generations keyed by `(container_uuid, container_generation)`
+    for tails whose shard metadata decrypts with the provided key.
+    """
+    generations: dict[tuple[bytes, int], _GenerationInfo] = {}
+
+    for path, tail in tails.items():
+        try:
+            sm = shard_metadata.ShardMetadata.from_encrypted(
+                tail[key_material.SIZE:], master_key
+            )
+        except Exception:
+            continue
+
+        shard_bytes = tail[key_material.SIZE + shard_metadata.SIZE:]
+        generation_key = (sm.container_uuid, sm.container_generation)
+
+        if generation_key not in generations:
+            generations[generation_key] = _GenerationInfo(
+                container_uuid=sm.container_uuid,
+                container_generation=sm.container_generation,
+                container_threshold=sm.container_threshold,
+                shard_total=sm.shard_total,
+                shards={},
+                carrier_map={},
+            )
+
+        info = generations[generation_key]
+        info.shards[sm.shard_index] = shard_bytes
+        info.carrier_map[sm.shard_index] = path
+
+    return generations
+
+
+def _collect_load_candidates(tails: dict[Path, bytes], password: str) -> list[_LoadCandidate]:
+    """
+    Build decryption candidates from password-verifiable carriers.
+
+    Each candidate is rooted at one tail whose key material decrypts
+    with the user password.
+    """
+    candidates: list[_LoadCandidate] = []
+
+    for key_tail in tails.values():
+        try:
+            km = key_material.KeyMaterial.from_bytes(key_tail)
+            master_key = km.decrypt_master_key(password)
+        except Exception:
+            continue
+
+        generations = _collect_generations_for_master_key(tails, master_key)
+        candidates.append(_LoadCandidate(master_key=master_key, generations=generations))
+
+    return candidates
+
+
+def _select_best_generation_candidate(
+    candidates: list[_LoadCandidate],
+) -> tuple[_GenerationInfo, bytes] | None:
+    """
+    Select the newest recoverable generation across all candidates.
+    """
+    best_info: _GenerationInfo | None = None
+    best_master_key: bytes | None = None
+
+    for candidate in candidates:
+        info = _latest_recoverable_generation(candidate.generations)
+        if info is None:
+            continue
+        if best_info is None or info.container_generation > best_info.container_generation:
+            best_info = info
+            best_master_key = candidate.master_key
+
+    if best_info is None or best_master_key is None:
+        return None
+    return best_info, best_master_key
+
+
+def _build_state_from_generation(
+    generation: _GenerationInfo, master_key: bytes
+) -> ContainerState:
+    """
+    Decode one generation and convert it into runtime container state.
+    """
+    k = generation.container_threshold
+    n = generation.shard_total
+    available = sorted(generation.shards)[:k]
+
+    zip_data = payload.decode(
+        [generation.shards[i] for i in available], available, master_key, k, n
+    )
+    carriers = [
+        (generation.carrier_map[i], i) for i in sorted(generation.carrier_map)
+    ]
+
+    return ContainerState(
+        master_key=master_key,
+        container_uuid=generation.container_uuid,
+        container_generation=generation.container_generation,
+        container_threshold=k,
+        shard_total=n,
+        carriers=carriers,
+        zip_data=zip_data,
+    )
+
+
 def init(directory: Path, password: str, container_threshold: int) -> None:
     """
     Create a new encrypted container across JPEG carriers.
@@ -204,83 +327,16 @@ def load(directory: Path, password: str) -> ContainerState:
         raise ContainerNotFoundError("No jpegfs container found in the directory.")
 
     tails = {path: jpeg.read_tail(path) for path in with_tails}
-    candidates: list[tuple[bytes, dict[tuple[bytes, int], _GenerationInfo]]] = []
-    password_verified = False
-
-    for key_path, key_tail in tails.items():
-        try:
-            km = key_material.KeyMaterial.from_bytes(key_tail)
-            master_key = km.decrypt_master_key(password)
-        except Exception:
-            continue
-
-        password_verified = True
-
-        shard_info: dict[tuple[bytes, int], _GenerationInfo] = {}
-
-        for path, tail in tails.items():
-            try:
-                sm = shard_metadata.ShardMetadata.from_encrypted(
-                    tail[key_material.SIZE:], master_key
-                )
-            except Exception:
-                continue
-
-            shard_bytes = tail[key_material.SIZE + shard_metadata.SIZE:]
-            gen_key = (sm.container_uuid, sm.container_generation)
-
-            if gen_key not in shard_info:
-                shard_info[gen_key] = _GenerationInfo(
-                    container_uuid=sm.container_uuid,
-                    container_generation=sm.container_generation,
-                    container_threshold=sm.container_threshold,
-                    shard_total=sm.shard_total,
-                    shards={},
-                    carrier_map={},
-                )
-
-            info = shard_info[gen_key]
-            info.shards[sm.shard_index] = shard_bytes
-            info.carrier_map[sm.shard_index] = path
-
-        candidates.append((master_key, shard_info))
-
-    if not password_verified:
+    candidates = _collect_load_candidates(tails, password)
+    if not candidates:
         raise InvalidPasswordError("Invalid password or corrupted data.")
 
-    best: _GenerationInfo | None = None
-    best_master_key = None
-
-    for master_key, shard_info in candidates:
-        info = _latest_recoverable_generation(shard_info)
-        if info is None:
-            continue
-        if best is None or info.container_generation > best.container_generation:
-            best = info
-            best_master_key = master_key
-
-    if best is None or best_master_key is None:
+    selected = _select_best_generation_candidate(candidates)
+    if selected is None:
         raise InsufficientShardsError("Not enough shards to reconstruct the container.")
 
-    k = best.container_threshold
-    n = best.shard_total
-    available = sorted(best.shards)[:k]
-
-    zip_data = payload.decode(
-        [best.shards[i] for i in available], available, best_master_key, k, n
-    )
-
-    carriers = [(best.carrier_map[i], i) for i in sorted(best.carrier_map)]
-
-    return ContainerState(
-        master_key=best_master_key,
-        container_uuid=best.container_uuid,
-        container_generation=best.container_generation,
-        container_threshold=k,
-        shard_total=n,
-        carriers=carriers,
-        zip_data=zip_data,
-    )
+    best_generation, best_master_key = selected
+    return _build_state_from_generation(best_generation, best_master_key)
 
 
 def store(state: ContainerState, new_zip_data: bytes, password: str) -> None:
