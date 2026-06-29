@@ -127,8 +127,8 @@ def cmd_ls(args: argparse.Namespace) -> None:
     total_size = sum(f.size for f in files)
 
     print(f"UUID:       {uuid_str}")
-    print(f"Generation: {state.generation}")
-    print(f"Threshold:  {state.threshold}/{state.shard_total}")
+    print(f"Generation: {state.container_generation}")
+    print(f"Threshold:  {state.container_threshold}/{state.shard_total}")
     print(f"Shards:     {len(state.carriers)}/{state.shard_total} available")
     print(f"Size:       {_fmt_size(total_size)}")
     print()

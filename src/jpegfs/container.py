@@ -14,17 +14,16 @@ from .errors import (
 )
 
 _MASTER_KEY_SIZE = 32
-_UUID_SIZE = 16
-_TAIL_MIN_SIZE = key_material.SIZE + shard_metadata.SIZE  # 76 + 54 = 130
+_CONTAINER_UUID_SIZE = 16
 
 
 @dataclass
 class ContainerState:
-    master_key: bytes
-    container_uuid: bytes
-    generation: int
-    threshold: int
-    shard_total: int
+    master_key: bytes          # 32 bytes
+    container_uuid: bytes      # 16 bytes
+    container_generation: int  # 4 bytes
+    container_threshold: int   # 2 bytes
+    shard_total: int           # 2 bytes
     carriers: list[tuple[Path, int]]  # (path, shard_index)
     zip_data: bytes
 
@@ -43,12 +42,12 @@ def scan_jpeg_files(directory: Path) -> list[Path]:
 
 def has_tail(path: Path) -> bool:
     """
-    Check whether a JPEG file appears to contain jpegfs data.
+    Check whether a JPEG file has any appended data after EOI.
 
-    Reads bytes appended after the JPEG EOI marker and treats
-    large enough tails as possible container metadata.
+    Returns True when bytes are present after the JPEG EOI marker,
+    indicating the file may carry jpegfs container data.
     """
-    return len(jpeg.read_tail(path)) >= _TAIL_MIN_SIZE
+    return len(jpeg.read_tail(path)) > 0
 
 
 def _verify_password(path: Path, password: str) -> bytes:
@@ -75,7 +74,7 @@ def _two_phase_write(tmp_map: list[tuple[Path, Path]], directory: Path) -> None:
     jpeg._fsync_dir(directory)
 
 
-def init(directory: Path, password: str, threshold: int) -> None:
+def init(directory: Path, password: str, container_threshold: int) -> None:
     """
     Create a new encrypted container across JPEG carriers.
 
@@ -89,12 +88,12 @@ def init(directory: Path, password: str, threshold: int) -> None:
 
     n = len(carriers)
 
-    if threshold < 1:
+    if container_threshold < 1:
         raise ValueError("Threshold must be at least 1.")
 
-    if threshold > n:
+    if container_threshold > n:
         raise NotEnoughCarriersError(
-            f"Threshold ({threshold}) exceeds the number of JPEG files ({n})."
+            f"Threshold ({container_threshold}) exceeds the number of JPEG files ({n})."
         )
 
     for path in carriers:
@@ -105,11 +104,11 @@ def init(directory: Path, password: str, threshold: int) -> None:
             )
 
     master_key = crypto.random_bytes(_MASTER_KEY_SIZE)
-    container_uuid = crypto.random_bytes(_UUID_SIZE)
-    generation = 1
+    container_uuid = crypto.random_bytes(_CONTAINER_UUID_SIZE)
+    container_generation = 1
 
     empty_zip = payload.create_empty_zip()
-    shards = payload.encode(empty_zip, master_key, threshold, n)
+    shards = payload.encode(empty_zip, master_key, container_threshold, n)
 
     tmp_map: list[tuple[Path, Path]] = []
     try:
@@ -117,8 +116,8 @@ def init(directory: Path, password: str, threshold: int) -> None:
             km = key_material.KeyMaterial.create(password, master_key)
             sm = shard_metadata.ShardMetadata(
                 container_uuid=container_uuid,
-                container_generation=generation,
-                container_threshold=threshold,
+                container_generation=container_generation,
+                container_threshold=container_threshold,
                 shard_index=i,
                 shard_total=n,
             )
@@ -222,8 +221,8 @@ def load(directory: Path, password: str) -> ContainerState:
     return ContainerState(
         master_key=best_master_key,
         container_uuid=best["uuid"],
-        generation=best["generation"],
-        threshold=k,
+        container_generation=best["generation"],
+        container_threshold=k,
         shard_total=n,
         carriers=carriers,
         zip_data=zip_data,
@@ -237,9 +236,9 @@ def store(state: ContainerState, new_zip_data: bytes, password: str) -> None:
     Encrypts the payload, creates fresh shards and metadata,
     then rewrites all current carrier tails atomically.
     """
-    new_generation = state.generation + 1
+    new_generation = state.container_generation + 1
     new_shards = payload.encode(
-        new_zip_data, state.master_key, state.threshold, state.shard_total
+        new_zip_data, state.master_key, state.container_threshold, state.shard_total
     )
 
     tmp_map: list[tuple[Path, Path]] = []
@@ -249,7 +248,7 @@ def store(state: ContainerState, new_zip_data: bytes, password: str) -> None:
             sm = shard_metadata.ShardMetadata(
                 container_uuid=state.container_uuid,
                 container_generation=new_generation,
-                container_threshold=state.threshold,
+                container_threshold=state.container_threshold,
                 shard_index=shard_index,
                 shard_total=state.shard_total,
             )
@@ -342,14 +341,14 @@ def repair(directory: Path, password: str) -> tuple[int, int, int]:
     all_jpegs = scan_jpeg_files(directory)
     new_n = len(all_jpegs)
 
-    if new_n < state.threshold:
-        needed = state.threshold - new_n
+    if new_n < state.container_threshold:
+        needed = state.container_threshold - new_n
         raise NotEnoughCarriersError(
             f"Not enough JPEG files. Add {needed} more JPEG file(s) to the directory."
         )
 
-    new_generation = state.generation + 1
-    new_shards = payload.encode(state.zip_data, state.master_key, state.threshold, new_n)
+    new_generation = state.container_generation + 1
+    new_shards = payload.encode(state.zip_data, state.master_key, state.container_threshold, new_n)
 
     tmp_map: list[tuple[Path, Path]] = []
     try:
@@ -358,7 +357,7 @@ def repair(directory: Path, password: str) -> tuple[int, int, int]:
             sm = shard_metadata.ShardMetadata(
                 container_uuid=state.container_uuid,
                 container_generation=new_generation,
-                container_threshold=state.threshold,
+                container_threshold=state.container_threshold,
                 shard_index=i,
                 shard_total=new_n,
             )
