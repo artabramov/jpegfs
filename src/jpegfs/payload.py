@@ -3,10 +3,16 @@
 import io
 import struct
 import zipfile
+from dataclasses import dataclass
 
 import zfec
 
 from . import crypto
+from .errors import (
+    ContainerFileExistsError,
+    ContainerFileNotFoundError,
+    InsufficientShardsError,
+)
 
 _NONCE_SIZE = 12
 _LEN_HEADER = 4  # big-endian uint32 prefix storing original ciphertext length
@@ -47,14 +53,64 @@ def create_empty_zip() -> bytes:
     return buf.getvalue()
 
 
-from dataclasses import dataclass
-
-
 @dataclass
 class FileInfo:
     name: str
     size: int       # uncompressed bytes
     modified: tuple # (year, month, day, hour, minute, second)
+
+
+def _copy_entries(
+    zin: zipfile.ZipFile,
+    zout: zipfile.ZipFile,
+    *,
+    exclude_name: str | None = None,
+) -> None:
+    """
+    Copy ZIP entries from one archive into another.
+
+    Preserves each original entry metadata while optionally skipping
+    one entry by name.
+    """
+    for info in zin.infolist():
+        if info.filename == exclude_name:
+            continue
+        zout.writestr(info, zin.read(info.filename))
+
+
+def _rewrite_zip(
+    zip_data: bytes,
+    *,
+    exclude_name: str | None = None,
+    must_exist_name: str | None = None,
+    must_not_exist_name: str | None = None,
+    add_entry: tuple[str, bytes] | None = None,
+) -> bytes:
+    """
+    Rewrite a ZIP payload through a read-and-write archive pair.
+
+    Opens source and destination ZIP archives, validates optional
+    preconditions, copies existing entries, and applies optional
+    delete/add operations.
+    """
+    new_buf = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(zip_data), "r") as zin:
+        names = set(zin.namelist())
+        if must_exist_name is not None and must_exist_name not in names:
+            raise ContainerFileNotFoundError(
+                f"'{must_exist_name}' not found in the container."
+            )
+        if must_not_exist_name is not None and must_not_exist_name in names:
+            raise ContainerFileExistsError(
+                f"'{must_not_exist_name}' already exists in the container. Delete it first."
+            )
+
+        with zipfile.ZipFile(new_buf, "w", compression=zipfile.ZIP_STORED) as zout:
+            _copy_entries(zin, zout, exclude_name=exclude_name)
+            if add_entry is not None:
+                add_name, add_content = add_entry
+                zout.writestr(add_name, add_content)
+    return new_buf.getvalue()
 
 
 def zip_list_files(zip_data: bytes) -> list[str]:
@@ -89,12 +145,12 @@ def zip_get_file(zip_data: bytes, name: str) -> bytes:
     Validates the requested name, checks that the entry exists,
     and returns its stored bytes.
     """
-    from .errors import ContainerFileNotFoundError
     validate_name(name)
     with zipfile.ZipFile(io.BytesIO(zip_data), "r") as zf:
-        if name not in zf.namelist():
+        try:
+            return zf.read(name)
+        except KeyError:
             raise ContainerFileNotFoundError(f"'{name}' not found in the container.")
-        return zf.read(name)
 
 
 def zip_delete_file(zip_data: bytes, name: str) -> bytes:
@@ -104,17 +160,12 @@ def zip_delete_file(zip_data: bytes, name: str) -> bytes:
     Copies all entries except the requested one into a new
     stored-mode ZIP archive and returns the resulting bytes.
     """
-    from .errors import ContainerFileNotFoundError
     validate_name(name)
-    if name not in zip_list_files(zip_data):
-        raise ContainerFileNotFoundError(f"'{name}' not found in the container.")
-    new_buf = io.BytesIO()
-    with zipfile.ZipFile(io.BytesIO(zip_data), "r") as zin:
-        with zipfile.ZipFile(new_buf, "w", compression=zipfile.ZIP_STORED) as zout:
-            for info in zin.infolist():
-                if info.filename != name:
-                    zout.writestr(info, zin.read(info.filename))
-    return new_buf.getvalue()
+    return _rewrite_zip(
+        zip_data,
+        exclude_name=name,
+        must_exist_name=name,
+    )
 
 
 def zip_add_file(zip_data: bytes, name: str, content: bytes) -> bytes:
@@ -124,19 +175,12 @@ def zip_add_file(zip_data: bytes, name: str, content: bytes) -> bytes:
     Validates the name, rejects duplicates, copies existing entries,
     and writes the new file into a fresh stored-mode ZIP archive.
     """
-    from .errors import ContainerFileExistsError
     validate_name(name)
-    if name in zip_list_files(zip_data):
-        raise ContainerFileExistsError(
-            f"'{name}' already exists in the container. Delete it first."
-        )
-    new_buf = io.BytesIO()
-    with zipfile.ZipFile(io.BytesIO(zip_data), "r") as zin:
-        with zipfile.ZipFile(new_buf, "w", compression=zipfile.ZIP_STORED) as zout:
-            for info in zin.infolist():
-                zout.writestr(info, zin.read(info.filename))
-            zout.writestr(name, content)
-    return new_buf.getvalue()
+    return _rewrite_zip(
+        zip_data,
+        must_not_exist_name=name,
+        add_entry=(name, content),
+    )
 
 
 def encode(zip_data: bytes, master_key: bytes, k: int, n: int) -> list[bytes]:
@@ -169,8 +213,6 @@ def decode(shards: list[bytes | None], indices: list[int], master_key: bytes, k:
     Uses at least the threshold number of shards, removes framing
     and padding, then decrypts the recovered ciphertext.
     """
-    from .errors import InsufficientShardsError
-
     available = [(s, i) for s, i in zip(shards, indices) if s is not None]
     if len(available) < k:
         raise InsufficientShardsError(f"Need {k} shards, got {len(available)}.")
