@@ -8,7 +8,7 @@ User files are encrypted with a randomly generated master key and split into red
 
 The project is **not a steganographic system in the traditional sense.** The additional data can be easily detected by examining the contents of a file beyond the JPEG `EOI`. However, the images themselves remain unchanged, and the appended data appears as a cryptographically random sequence of bytes. It contains no plaintext information and does not reveal its purpose or contents without knowledge of the correct password. Even when such data is discovered, the data appears indistinguishable from random noise.
 
-[![PyPI](https://img.shields.io/pypi/v/jpegfs)](https://pypi.org/project/jpegfs/) ![tests](https://img.shields.io/badge/tests-passed-2f81f7) [![license](https://img.shields.io/badge/license-GPL--3.0-2f81f7)](./LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/jpegfs)](https://pypi.org/project/jpegfs/) [![tests](https://github.com/artabramov/jpegfs/actions/workflows/tests.yml/badge.svg)](https://github.com/artabramov/jpegfs/actions/workflows/tests.yml) [![license](https://img.shields.io/badge/license-GPL--3.0-2f81f7)](./LICENSE)
 
 
 ## Threat model
@@ -104,13 +104,13 @@ jpegfs get secret.pdf
 
 All commands accept an optional `--dir` argument that specifies the directory containing the container JPEG files. If omitted, the current directory is used. All commands require a password.
 
-`help` — display command-line help and usage information.
+`-h`, `--help` — display command-line help and usage information.
 
 `init` — create a new container. Accepts `--threshold`. Generates a random `master_key`, creates a new `container_uuid`, sets `generation = 1`, and creates an empty ZIP archive. If the directory already contains at least one valid `jpegfs` shard, the command fails.
 
 `list`, `ls` — display container information (`UUID`, `generation`, `threshold`, available shards) followed by a table of files stored in the container, including file name, uncompressed size, and last modified timestamp.
 
-`repair` — restore full shard redundancy. Locates all JPEG files containing valid shards, reconstructs the latest recoverable generation, decrypts the container, finds unused JPEG files without appended data, increments the generation number, and rebuilds the container using a new set of JPEG files. If there are not enough clean JPEG files available, the command fails and reports how many additional JPEG files must be added.
+`repair` — restore full shard redundancy. Reconstructs the latest recoverable generation, increments the generation number, and redistributes the container across all JPEG files currently present in the directory (one shard per JPEG). If there are fewer JPEG files than the configured threshold, the command fails and reports how many additional JPEG files must be added.
 
 `wipe --yes` — permanently destroy the container by removing all appended data from participating JPEG files (truncate files after the JPEG `EOI` marker `FF D9`). The `--yes` flag is mandatory.
 

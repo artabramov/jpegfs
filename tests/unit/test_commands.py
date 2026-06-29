@@ -81,6 +81,43 @@ class TestReadPassword(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 1)
 
 
+class TestCommonHelpers(unittest.TestCase):
+
+    def test_resolve_directory_returns_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = argparse.Namespace(dir=tmp)
+            self.assertEqual(commands._resolve_directory(args), Path(tmp).resolve())
+
+    def test_resolve_directory_exits_when_missing(self):
+        missing = Path(tempfile.gettempdir()) / "jpegfs-unit-missing-dir"
+        args = argparse.Namespace(dir=str(missing))
+        with self.assertRaises(SystemExit) as ctx:
+            with redirect_stderr(io.StringIO()):
+                commands._resolve_directory(args)
+        self.assertEqual(ctx.exception.code, 1)
+
+    def test_run_or_exit_returns_result(self):
+        def ok(a, b):
+            return a + b
+        self.assertEqual(commands._run_or_exit(ok, 2, 3), 5)
+
+    def test_run_or_exit_exits_for_value_error(self):
+        def fail():
+            raise ValueError("bad value")
+        with self.assertRaises(SystemExit) as ctx:
+            with redirect_stderr(io.StringIO()):
+                commands._run_or_exit(fail)
+        self.assertEqual(ctx.exception.code, 1)
+
+    def test_run_or_exit_exits_for_jpegfs_error(self):
+        def fail():
+            raise ContainerNotFoundError("no container")
+        with self.assertRaises(SystemExit) as ctx:
+            with redirect_stderr(io.StringIO()):
+                commands._run_or_exit(fail)
+        self.assertEqual(ctx.exception.code, 1)
+
+
 class TestCmdHelp(unittest.TestCase):
 
     def test_prints_help_text(self):

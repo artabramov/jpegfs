@@ -101,6 +101,43 @@ def _read_password(args: argparse.Namespace, confirm: bool = False,
     return password
 
 
+def _exit_error(message: str) -> None:
+    """
+    Print a formatted command error and exit.
+
+    Uses a consistent stderr prefix for user-facing failures
+    reported by command handlers.
+    """
+    print(f"Error: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def _resolve_directory(args: argparse.Namespace) -> Path:
+    """
+    Resolve and validate the target container directory argument.
+
+    Exits with code 1 when the provided path does not exist
+    or is not a directory.
+    """
+    directory = Path(args.dir).resolve()
+    if not directory.is_dir():
+        _exit_error(f"'{directory}' is not a directory.")
+    return directory
+
+
+def _run_or_exit(func, *args):
+    """
+    Execute a container operation and convert known errors to CLI exits.
+
+    Handles jpegfs domain errors and validation failures uniformly,
+    preserving command-specific success-path code.
+    """
+    try:
+        return func(*args)
+    except (JpegFsError, ValueError) as e:
+        _exit_error(str(e))
+
+
 def cmd_ls(args: argparse.Namespace) -> None:
     """
     List files stored in an encrypted jpegfs container.
@@ -108,18 +145,9 @@ def cmd_ls(args: argparse.Namespace) -> None:
     Loads the container, prints container metadata, and displays
     stored file names, sizes, modification times, and total size.
     """
-    directory = Path(args.dir).resolve()
-    if not directory.is_dir():
-        print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
-        sys.exit(1)
-
+    directory = _resolve_directory(args)
     password = _read_password(args)
-
-    try:
-        state = container.load(directory, password)
-    except (JpegFsError, ValueError) as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    state = _run_or_exit(container.load, directory, password)
 
     files = payload.zip_list_files_info(state.zip_data)
 
@@ -171,15 +199,10 @@ def cmd_put(args: argparse.Namespace) -> None:
     Reads the source file from disk, optionally stores it under
     a different name, and persists the updated container state.
     """
-    directory = Path(args.dir).resolve()
-    if not directory.is_dir():
-        print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
-        sys.exit(1)
-
+    directory = _resolve_directory(args)
     source = Path(args.file)
     if not source.is_file():
-        print(f"Error: '{source}' is not a file.", file=sys.stderr)
-        sys.exit(1)
+        _exit_error(f"'{source}' is not a file.")
     name = args.as_name if args.as_name else source.name
     try:
         content = source.read_bytes()
@@ -188,12 +211,7 @@ def cmd_put(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     password = _read_password(args)
-
-    try:
-        container.put_file(directory, password, name, content)
-    except (JpegFsError, ValueError) as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    _run_or_exit(container.put_file, directory, password, name, content)
 
     print(f"'{name}' added to the container.")
 
@@ -205,20 +223,11 @@ def cmd_write(args: argparse.Namespace) -> None:
     Reads raw bytes from standard input and writes them under
     the required container file name.
     """
-    directory = Path(args.dir).resolve()
-    if not directory.is_dir():
-        print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
-        sys.exit(1)
-
+    directory = _resolve_directory(args)
     name = args.as_name
     content = sys.stdin.buffer.read()
     password = _read_password(args)
-
-    try:
-        container.put_file(directory, password, name, content)
-    except (JpegFsError, ValueError) as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    _run_or_exit(container.put_file, directory, password, name, content)
 
     print(f"'{name}' added to the container.")
 
@@ -230,20 +239,11 @@ def cmd_get(args: argparse.Namespace) -> None:
     Loads the requested file from the encrypted container
     and writes it to the selected output path.
     """
-    directory = Path(args.dir).resolve()
-    if not directory.is_dir():
-        print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
-        sys.exit(1)
-
+    directory = _resolve_directory(args)
     output_name = args.as_name if args.as_name else args.name
     output_path = Path(output_name)
     password = _read_password(args)
-
-    try:
-        content = container.get_file(directory, password, args.name)
-    except (JpegFsError, ValueError) as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    content = _run_or_exit(container.get_file, directory, password, args.name)
 
     try:
         output_path.write_bytes(content)
@@ -261,19 +261,9 @@ def cmd_read(args: argparse.Namespace) -> None:
     Retrieves the requested file from the encrypted container
     and streams its raw bytes to standard output.
     """
-    directory = Path(args.dir).resolve()
-    if not directory.is_dir():
-        print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
-        sys.exit(1)
-
+    directory = _resolve_directory(args)
     password = _read_password(args)
-
-    try:
-        content = container.get_file(directory, password, args.name)
-    except (JpegFsError, ValueError) as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-
+    content = _run_or_exit(container.get_file, directory, password, args.name)
     sys.stdout.buffer.write(content)
 
 
@@ -284,18 +274,9 @@ def cmd_del(args: argparse.Namespace) -> None:
     Loads the current container state, removes the requested entry,
     and saves the updated payload back to the carriers.
     """
-    directory = Path(args.dir).resolve()
-    if not directory.is_dir():
-        print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
-        sys.exit(1)
-
+    directory = _resolve_directory(args)
     password = _read_password(args)
-
-    try:
-        container.del_file(directory, password, args.name)
-    except (JpegFsError, ValueError) as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    _run_or_exit(container.del_file, directory, password, args.name)
 
     print(f"'{args.name}' deleted from the container.")
 
@@ -307,19 +288,10 @@ def cmd_passwd(args: argparse.Namespace) -> None:
     Verifies the current password and re-encrypts carrier key
     material with the newly entered password.
     """
-    directory = Path(args.dir).resolve()
-    if not directory.is_dir():
-        print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
-        sys.exit(1)
-
+    directory = _resolve_directory(args)
     old_password = _read_password(args, prompt="Current password: ")
     new_password = _read_password(args, confirm=True, prompt="New password: ")
-
-    try:
-        container.change_password(directory, old_password, new_password)
-    except (JpegFsError, ValueError) as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    _run_or_exit(container.change_password, directory, old_password, new_password)
 
     print("Password changed successfully.")
 
@@ -331,19 +303,9 @@ def cmd_wipe(args: argparse.Namespace) -> None:
     Loads the recoverable container and clears appended jpegfs tails
     from the carrier files that belong to it.
     """
-    directory = Path(args.dir).resolve()
-    if not directory.is_dir():
-        print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
-        sys.exit(1)
-
+    directory = _resolve_directory(args)
     password = _read_password(args)
-
-    try:
-        count = container.wipe(directory, password)
-    except (JpegFsError, ValueError) as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-
+    count = _run_or_exit(container.wipe, directory, password)
     print(f"Container wiped: {count} file(s) cleared.")
 
 
@@ -354,18 +316,11 @@ def cmd_repair(args: argparse.Namespace) -> None:
     Rebuilds the current payload across all JPEG files in the directory
     and reports how the available shard set changed.
     """
-    directory = Path(args.dir).resolve()
-    if not directory.is_dir():
-        print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
-        sys.exit(1)
-
+    directory = _resolve_directory(args)
     password = _read_password(args)
-
-    try:
-        old_available, old_total, new_total = container.repair(directory, password)
-    except (JpegFsError, ValueError) as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    old_available, old_total, new_total = _run_or_exit(
+        container.repair, directory, password
+    )
 
     if new_total != old_total or old_available < old_total:
         print(
@@ -383,17 +338,8 @@ def cmd_init(args: argparse.Namespace) -> None:
     Reads and confirms the password, validates the target directory,
     and creates encrypted shards across the available carrier files.
     """
-    directory = Path(args.dir).resolve()
-    if not directory.is_dir():
-        print(f"Error: '{directory}' is not a directory.", file=sys.stderr)
-        sys.exit(1)
-
+    directory = _resolve_directory(args)
     password = _read_password(args, confirm=True)
-
-    try:
-        container.init(directory, password, args.threshold)
-    except (JpegFsError, ValueError) as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    _run_or_exit(container.init, directory, password, args.threshold)
 
     print(f"Container initialized in '{directory}'.")
