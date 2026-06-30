@@ -10,6 +10,8 @@ The project is **not a steganographic system in the traditional sense.** The add
 
 [![PyPI](https://img.shields.io/pypi/v/jpegfs)](https://pypi.org/project/jpegfs/) [![tests](https://github.com/artabramov/jpegfs/actions/workflows/tests.yml/badge.svg)](https://github.com/artabramov/jpegfs/actions/workflows/tests.yml) [![license](https://img.shields.io/badge/license-GPL--3.0-2f81f7)](./LICENSE)
 
+If you like it, star it ⭐ — it helps discoverability. Thank you!
+
 
 ## Threat model
 
@@ -214,6 +216,12 @@ src/jpegfs/
 ├── payload.py         ZIP, encryption, and zfec encoding/decoding
 └── shard_metadata.py  54-byte encrypted shard metadata format
 ```
+
+
+## Project stack
+
+- **cryptography** — encryption primitives
+- **zfec** — erasure coding tool
 
 
 ## License
